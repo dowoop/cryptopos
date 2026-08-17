@@ -1,0 +1,217 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:rail_key",
+ "creation": "2026-08-15 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "rail_key",
+  "label",
+  "enabled",
+  "chain",
+  "asset",
+  "family",
+  "column_break_units",
+  "unit_name",
+  "native_decimals",
+  "display_decimals",
+  "section_gate",
+  "gate_confs",
+  "testnet_gate_confs",
+  "gate_text",
+  "column_break_gate",
+  "binding_text",
+  "maturity",
+  "maturity_note",
+  "section_endpoints",
+  "testnet_url",
+  "testnet_transport",
+  "testnet_name",
+  "column_break_endpoints",
+  "live_url",
+  "real_transport",
+  "sim_block_seconds"
+ ],
+ "fields": [
+  {
+   "fieldname": "rail_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Rail Key",
+   "reqd": 1,
+   "unique": 1,
+   "description": "Short stable identifier, e.g. btc. Referenced by every sale."
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Label",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "chain",
+   "fieldtype": "Data",
+   "label": "Chain",
+   "reqd": 1
+  },
+  {
+   "fieldname": "asset",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Asset",
+   "reqd": 1
+  },
+  {
+   "fieldname": "family",
+   "fieldtype": "Select",
+   "label": "Family",
+   "options": "bitcoin\nevm-native\nevm-erc20\nsolana\nmonero\nzcash\ntari\nootle",
+   "reqd": 1,
+   "description": "Selects which watcher implementation handles this rail."
+  },
+  {
+   "fieldname": "column_break_units",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "unit_name",
+   "fieldtype": "Data",
+   "label": "Native Unit Name",
+   "description": "satoshi, wei, lamport ..."
+  },
+  {
+   "fieldname": "native_decimals",
+   "fieldtype": "Int",
+   "label": "Native Decimals",
+   "reqd": 1
+  },
+  {
+   "fieldname": "display_decimals",
+   "fieldtype": "Int",
+   "label": "Display Decimals"
+  },
+  {
+   "fieldname": "section_gate",
+   "fieldtype": "Section Break",
+   "label": "The Settle Gate"
+  },
+  {
+   "fieldname": "gate_confs",
+   "fieldtype": "Int",
+   "label": "Mainnet Gate Confirmations",
+   "reqd": 1
+  },
+  {
+   "fieldname": "testnet_gate_confs",
+   "fieldtype": "Int",
+   "label": "Testnet Gate Confirmations",
+   "description": "Chains settle differently on their testnets. Blank falls back to the mainnet figure."
+  },
+  {
+   "fieldname": "gate_text",
+   "fieldtype": "Small Text",
+   "label": "Gate Text",
+   "description": "The ceiling as shown to the operator, beside the promise it bounds."
+  },
+  {
+   "fieldname": "column_break_gate",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "binding_text",
+   "fieldtype": "Small Text",
+   "label": "Binding",
+   "description": "How strongly arriving money can be tied to one sale."
+  },
+  {
+   "fieldname": "maturity",
+   "fieldtype": "Select",
+   "label": "Maturity",
+   "options": "planned\npartial\nworks",
+   "default": "planned"
+  },
+  {
+   "fieldname": "maturity_note",
+   "fieldtype": "Small Text",
+   "label": "Maturity Note"
+  },
+  {
+   "fieldname": "section_endpoints",
+   "fieldtype": "Section Break",
+   "label": "Endpoints"
+  },
+  {
+   "fieldname": "testnet_url",
+   "fieldtype": "Data",
+   "label": "Testnet URL"
+  },
+  {
+   "fieldname": "testnet_transport",
+   "fieldtype": "Data",
+   "label": "Testnet Transport",
+   "description": "esplora-rest, json-rpc ..."
+  },
+  {
+   "fieldname": "testnet_name",
+   "fieldtype": "Data",
+   "label": "Testnet Name"
+  },
+  {
+   "fieldname": "column_break_endpoints",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "live_url",
+   "fieldtype": "Data",
+   "label": "Mainnet URL",
+   "description": "Empty means no endpoint. Mainnet is a non-working mode by decision; a sale may not be charged there."
+  },
+  {
+   "fieldname": "real_transport",
+   "fieldtype": "Small Text",
+   "label": "Real Transport",
+   "description": "What a production deployment would ride. Names a pattern, not a layer that exists here."
+  },
+  {
+   "fieldname": "sim_block_seconds",
+   "fieldtype": "Int",
+   "label": "Simulated Block Seconds",
+   "default": "15"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CryptoPoS",
+ "name": "Crypto Rail",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

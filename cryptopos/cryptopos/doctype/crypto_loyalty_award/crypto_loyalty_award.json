@@ -1,0 +1,243 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-15 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "is_submittable": 0,
+ "field_order": [
+  "naming_series",
+  "state",
+  "sale",
+  "column_break_top",
+  "points",
+  "reason",
+  "section_who",
+  "account",
+  "sale_ref",
+  "column_break_who",
+  "earn_rate_snapshot",
+  "usd_cents",
+  "section_chain",
+  "component",
+  "points_resource",
+  "column_break_chain",
+  "redemption_rate_at_award",
+  "tx_id",
+  "section_times",
+  "requested_at",
+  "attempted_at",
+  "column_break_times",
+  "finished_at",
+  "attempts",
+  "section_evidence",
+  "toolkit_output"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "options": "CPA-.YYYY.-",
+   "default": "CPA-.YYYY.-"
+  },
+  {
+   "default": "pending",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "pending\nissued\nrefused\nunverified\nnot_offered",
+   "read_only": 1,
+   "reqd": 1,
+   "description": "unverified means the attempt did not confirm in time. It may still land; this record does not claim it. That is deliberate under-claiming: a customer told they hold nothing who turns out to hold something is pleased, and the reverse is a broken promise."
+  },
+  {
+   "fieldname": "sale",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sale",
+   "options": "Crypto Sale",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "points",
+   "fieldtype": "Long Int",
+   "in_list_view": 1,
+   "label": "Points",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "read_only": 1,
+   "description": "Why this is not issued, in words a cashier can read aloud."
+  },
+  {
+   "fieldname": "section_who",
+   "fieldtype": "Section Break",
+   "label": "Who And For What"
+  },
+  {
+   "fieldname": "account",
+   "fieldtype": "Data",
+   "label": "Customer Ootle Account",
+   "read_only": 1,
+   "description": "An address, never a key. Awarding needs only the merchant's signature, so earning takes nothing from the customer."
+  },
+  {
+   "fieldname": "sale_ref",
+   "fieldtype": "Data",
+   "label": "On-chain Sale Reference",
+   "read_only": 1,
+   "description": "The unguessable invoice_ref, never the sequential invoice_id. A public ledger should not carry a counter of how many sales this merchant has made."
+  },
+  {
+   "fieldname": "column_break_who",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "earn_rate_snapshot",
+   "fieldtype": "Int",
+   "label": "Earn Rate At Charge (points per cent)",
+   "read_only": 1,
+   "description": "OPERATIONAL: the merchant changes this freely. Not the redemption rate, which is constitutional and has no setter. Conflating the two is the single most likely way to make this feature lie."
+  },
+  {
+   "default": "0",
+   "fieldname": "usd_cents",
+   "fieldtype": "Long Int",
+   "label": "Sale Total (USD cents)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_chain",
+   "fieldtype": "Section Break",
+   "label": "What Was Written To"
+  },
+  {
+   "fieldname": "component",
+   "fieldtype": "Data",
+   "label": "Component",
+   "read_only": 1
+  },
+  {
+   "fieldname": "points_resource",
+   "fieldtype": "Data",
+   "label": "Points Resource",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_chain",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "redemption_rate_at_award",
+   "fieldtype": "Long Int",
+   "label": "Redemption Rate Read At Award",
+   "read_only": 1,
+   "description": "CONSTITUTIONAL: points per cent, read off the component. It has no setter and cannot change. Recorded so a reprint can show what was true without asking the network again."
+  },
+  {
+   "fieldname": "tx_id",
+   "fieldtype": "Data",
+   "label": "Transaction Id",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_times",
+   "fieldtype": "Section Break",
+   "label": "Timing"
+  },
+  {
+   "fieldname": "requested_at",
+   "fieldtype": "Datetime",
+   "label": "Requested At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attempted_at",
+   "fieldtype": "Datetime",
+   "label": "Attempted At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_times",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "label": "Finished At",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Attempts",
+   "read_only": 1,
+   "description": "An award is never retried automatically after it has been submitted. A second submission is a second mint, and nothing on this contract can burn the duplicate."
+  },
+  {
+   "fieldname": "section_evidence",
+   "fieldtype": "Section Break",
+   "label": "Evidence",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "toolkit_output",
+   "fieldtype": "Code",
+   "label": "Toolkit Output",
+   "read_only": 1,
+   "description": "Kept verbatim. The toolkit exits 0 on a submitted-but-rejected transaction, so the exit code alone cannot be trusted and the text is the evidence."
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CryptoPoS",
+ "name": "Crypto Loyalty Award",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1
+  }
+ ],
+ "search_fields": "sale,account,tx_id",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

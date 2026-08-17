@@ -1,0 +1,437 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-15 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "is_submittable": 0,
+ "field_order": [
+  "naming_series",
+  "state",
+  "state_word",
+  "column_break_status",
+  "end_kind",
+  "review_reason",
+  "section_snapshot",
+  "mode",
+  "provenance",
+  "charged_at",
+  "column_break_snapshot",
+  "rail_key",
+  "merchant_name",
+  "chain_reference",
+  "section_money",
+  "usd_cents",
+  "invoiced_native",
+  "column_break_money",
+  "credited_native",
+  "sighted_native",
+  "section_rate",
+  "rate_microcents",
+  "rate_source",
+  "column_break_rate",
+  "rate_at",
+  "rate_lock_end",
+  "section_identity",
+  "identity_address",
+  "identity_source",
+  "column_break_identity",
+  "binding",
+  "identity_extras",
+  "section_payment",
+  "uri",
+  "qr_modules",
+  "column_break_payment",
+  "tx_id",
+  "settled_at",
+  "section_receipt",
+  "invoice_id",
+  "invoice_ref",
+  "column_break_receipt",
+  "sales_invoice",
+  "section_loyalty",
+  "loyalty_earn_rate",
+  "loyalty_account",
+  "loyalty_award",
+  "section_audit",
+  "events",
+  "watch_scratch"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "options": "CPS-.YYYY.-",
+   "default": "CPS-.YYYY.-"
+  },
+  {
+   "default": "idle",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "State",
+   "options": "idle\nawaiting\ndetected\nconfirming\nconfirmed\nexpired\nfailed\nneeds_review",
+   "read_only": 1,
+   "reqd": 1,
+   "description": "Eight states, four of them endings. needs_review exists so 'I cannot tell' is sayable; never collapse it into failed."
+  },
+  {
+   "fieldname": "state_word",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Shown As",
+   "read_only": 1,
+   "description": "What the operator sees. confirmed shows as SETTLED."
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "end_kind",
+   "fieldtype": "Select",
+   "label": "Ending",
+   "options": "\nclean\nunder\nover\nunidentified\nunverified",
+   "read_only": 1,
+   "description": "Which Done-screen variant applies. unidentified = money sighted but not nameable. unverified = the final look never reached the chain."
+  },
+  {
+   "fieldname": "review_reason",
+   "fieldtype": "Small Text",
+   "label": "Review Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_snapshot",
+   "fieldtype": "Section Break",
+   "label": "Snapshotted At Charge",
+   "description": "Written once by charge(). Nothing mid-flight may reclassify a sale."
+  },
+  {
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "label": "Mode",
+   "options": "demo\ntestnet\nmainnet",
+   "read_only": 1,
+   "reqd": 1,
+   "description": "The SALE's mode, not the terminal's switch. A mid-flight mode flip reclassifies nothing."
+  },
+  {
+   "fieldname": "provenance",
+   "fieldtype": "Select",
+   "label": "Provenance",
+   "options": "\nREAL\nSIMULATED",
+   "read_only": 1,
+   "description": "Stamped from the transport that actually answered. A simulated answer can only downgrade this, never upgrade it."
+  },
+  {
+   "fieldname": "charged_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Charged At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_snapshot",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "rail_key",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Rail",
+   "options": "Crypto Rail",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "merchant_name",
+   "fieldtype": "Data",
+   "label": "Merchant Name",
+   "read_only": 1,
+   "description": "Self-declared trading name as configured at charge. Stored so a reprint says what the customer was handed."
+  },
+  {
+   "default": "0",
+   "fieldname": "chain_reference",
+   "fieldtype": "Check",
+   "label": "Receipt May Carry Txid",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_money",
+   "fieldtype": "Section Break",
+   "label": "Money"
+  },
+  {
+   "fieldname": "usd_cents",
+   "fieldtype": "Long Int",
+   "label": "Invoiced (USD cents)",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "invoiced_native",
+   "fieldtype": "Data",
+   "label": "Invoiced (native units)",
+   "read_only": 1,
+   "reqd": 1,
+   "description": "THE amount, exact integer as a string. Stored as text because wei overflows bigint. URI, display and tolerance all derive from this one integer."
+  },
+  {
+   "fieldname": "column_break_money",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "credited_native",
+   "fieldtype": "Data",
+   "label": "Credited (bound)",
+   "read_only": 1,
+   "description": "BOUND money: arrived AND nameable. This is the only figure that books."
+  },
+  {
+   "default": "0",
+   "fieldname": "sighted_native",
+   "fieldtype": "Data",
+   "label": "Sighted (unbound)",
+   "read_only": 1,
+   "description": "UNBOUND money: real, but not provably this sale's. Displays and never books. A sale holding only this parks as NEEDS REVIEW."
+  },
+  {
+   "fieldname": "section_rate",
+   "fieldtype": "Section Break",
+   "label": "The Rate",
+   "description": "A rate is not a number. It is a number, a source, and a time."
+  },
+  {
+   "fieldname": "rate_microcents",
+   "fieldtype": "Long Int",
+   "label": "Rate (microcents per whole coin)",
+   "read_only": 1,
+   "description": "Cents x 10^4. Integer cents build a 3.3% error into the unit for a cheap asset, which is exactly where a terminal must be more precise."
+  },
+  {
+   "fieldname": "rate_source",
+   "fieldtype": "Data",
+   "label": "Rate Source",
+   "read_only": 1,
+   "description": "Who said so. A number nobody can attribute is not presented as verified."
+  },
+  {
+   "fieldname": "column_break_rate",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "rate_at",
+   "fieldtype": "Datetime",
+   "label": "Rate Read At",
+   "read_only": 1,
+   "description": "When the quote was read from the feed, not the charge time. The gap is staleness the operator is entitled to see."
+  },
+  {
+   "fieldname": "rate_lock_end",
+   "fieldtype": "Datetime",
+   "label": "Rate Lock Ends",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_identity",
+   "fieldtype": "Section Break",
+   "label": "Where The Money Goes"
+  },
+  {
+   "fieldname": "identity_address",
+   "fieldtype": "Data",
+   "label": "Address",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_source",
+   "fieldtype": "Select",
+   "label": "Identity Source",
+   "options": "\nconfig\nbundle\nsample\nnone",
+   "read_only": 1,
+   "description": "Whose address that was. A sale can be REAL and SETTLED while watching a placeholder nobody holds the keys to."
+  },
+  {
+   "fieldname": "column_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "binding",
+   "fieldtype": "Select",
+   "label": "Binding",
+   "options": "\nper-sale\nshared",
+   "read_only": 1
+  },
+  {
+   "fieldname": "identity_extras",
+   "fieldtype": "Code",
+   "label": "Identity Extras",
+   "options": "JSON",
+   "read_only": 1,
+   "description": "Rail extras: reference, payment_id, subaddr_index, memo, baseline."
+  },
+  {
+   "fieldname": "section_payment",
+   "fieldtype": "Section Break",
+   "label": "Payment"
+  },
+  {
+   "fieldname": "uri",
+   "fieldtype": "Small Text",
+   "label": "Payment URI",
+   "read_only": 1
+  },
+  {
+   "fieldname": "qr_modules",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "label": "QR Modules",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "The encoded module grid. Stored as data rather than markup because HTML sanitisation strips the attributes an inline SVG needs."
+  },
+  {
+   "fieldname": "column_break_payment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tx_id",
+   "fieldtype": "Data",
+   "label": "Transaction Id",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settled_at",
+   "fieldtype": "Datetime",
+   "label": "Settled At",
+   "read_only": 1,
+   "description": "When the money actually arrived, which is not when it was charged. Empty on a sale that never settled."
+  },
+  {
+   "fieldname": "section_receipt",
+   "fieldtype": "Section Break",
+   "label": "Receipt Identity"
+  },
+  {
+   "fieldname": "invoice_id",
+   "fieldtype": "Data",
+   "label": "Invoice Id",
+   "read_only": 1,
+   "description": "Readable, sequential."
+  },
+  {
+   "fieldname": "invoice_ref",
+   "fieldtype": "Data",
+   "label": "Invoice Ref",
+   "read_only": 1,
+   "description": "Unguessable, unordered."
+  },
+  {
+   "fieldname": "column_break_receipt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "ERPNext Sales Invoice",
+   "options": "Sales Invoice",
+   "read_only": 1,
+   "description": "Emitted only on a settled, bound, real sale. An uncertain sale has no invoice by design."
+  },
+  {
+   "fieldname": "section_loyalty",
+   "fieldtype": "Section Break",
+   "label": "Policy Tier",
+   "collapsible": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "loyalty_earn_rate",
+   "fieldtype": "Int",
+   "label": "Loyalty Earn Rate",
+   "read_only": 1,
+   "description": "Points per cent, snapshotted at charge. 0 means earning was not offered."
+  },
+  {
+   "fieldname": "loyalty_account",
+   "fieldtype": "Data",
+   "label": "Loyalty Account",
+   "read_only": 1,
+   "description": "An address, never a key."
+  },
+  {
+   "fieldname": "loyalty_award",
+   "fieldtype": "Code",
+   "label": "Loyalty Award",
+   "options": "JSON",
+   "read_only": 1,
+   "description": "What the network said, after the sale was booked. Nothing here may block a sale."
+  },
+  {
+   "fieldname": "section_audit",
+   "fieldtype": "Section Break",
+   "label": "Audit"
+  },
+  {
+   "fieldname": "events",
+   "fieldtype": "Table",
+   "label": "State Transitions",
+   "options": "Crypto Sale Event",
+   "read_only": 1,
+   "description": "Append-only. A record edited to stay current stops being a record."
+  },
+  {
+   "fieldname": "watch_scratch",
+   "fieldtype": "Code",
+   "label": "Watcher Scratchpad",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CryptoPoS",
+ "name": "Crypto Sale",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "invoice_id,tx_id,identity_address",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "invoice_id",
+ "track_changes": 1
+}

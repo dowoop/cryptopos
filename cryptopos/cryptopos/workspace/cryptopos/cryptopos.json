@@ -1,0 +1,99 @@
+{
+ "app": "cryptopos",
+ "charts": [],
+ "content": "[{\"id\":\"cpos_head\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Take a payment</b></span>\",\"col\":12}},{\"id\":\"cpos_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Terminal\",\"col\":3}},{\"id\":\"cpos_sc2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales\",\"col\":3}},{\"id\":\"cpos_sc3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Rails\",\"col\":3}},{\"id\":\"cpos_sc4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Settings\",\"col\":3}},{\"id\":\"cpos_head2\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Records</b></span>\",\"col\":12}},{\"id\":\"cpos_card1\",\"type\":\"card\",\"data\":{\"card_name\":\"Point of Sale\",\"col\":4}}]",
+ "creation": "2026-08-15 12:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "money-coins-1",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "CryptoPoS",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Point of Sale",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Crypto Sale",
+   "link_count": 0,
+   "link_to": "Crypto Sale",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Crypto Rail",
+   "link_count": 0,
+   "link_to": "Crypto Rail",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "CryptoPoS Settings",
+   "link_count": 0,
+   "link_to": "CryptoPoS Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-08-16 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CryptoPoS",
+ "name": "CryptoPoS",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 30.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "",
+   "label": "Terminal",
+   "link_to": "terminal",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Sales",
+   "link_to": "Crypto Sale",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Rails",
+   "link_to": "Crypto Rail",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Settings",
+   "link_to": "CryptoPoS Settings",
+   "type": "DocType"
+  }
+ ],
+ "title": "CryptoPoS"
+}

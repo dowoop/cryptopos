@@ -1,0 +1,89 @@
+{
+ "app": "cryptopos",
+ "creation": "2026-08-16 12:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "header_icon": "money-coins-1",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "home",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Home",
+   "link_to": "CryptoPoS",
+   "link_type": "Workspace",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "computer",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Terminal",
+   "link_to": "terminal",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "receipt",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Sales",
+   "link_to": "Crypto Sale",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "badge-cent",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Awards",
+   "link_to": "Crypto Loyalty Award",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "cable",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Rails",
+   "link_to": "Crypto Rail",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "settings",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Settings",
+   "link_to": "CryptoPoS Settings",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-08-16 20:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CryptoPoS",
+ "name": "CryptoPoS",
+ "owner": "Administrator",
+ "standard": 1,
+ "title": "CryptoPoS"
+}

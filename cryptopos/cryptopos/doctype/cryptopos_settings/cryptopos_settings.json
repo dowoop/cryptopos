@@ -1,0 +1,177 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-15 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "issingle": 1,
+ "field_order": [
+  "merchant_name",
+  "mode",
+  "column_break_top",
+  "chain_reference",
+  "loyalty_earn_rate",
+  "section_receiving",
+  "btc_testnet_address",
+  "section_loyalty",
+  "loyalty_enabled",
+  "ootle_indexer",
+  "loyalty_component",
+  "column_break_loyalty",
+  "loyalty_points_resource",
+  "award_queue_note",
+  "section_erpnext",
+  "customer",
+  "item_code",
+  "column_break_erpnext",
+  "company",
+  "cost_center"
+ ],
+ "fields": [
+  {
+   "fieldname": "merchant_name",
+   "fieldtype": "Data",
+   "label": "Merchant Trading Name",
+   "reqd": 1,
+   "description": "Self-declared. Snapshotted onto each sale at charge."
+  },
+  {
+   "default": "testnet",
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "label": "Mode",
+   "options": "demo\ntestnet\nmainnet",
+   "reqd": 1,
+   "description": "Mainnet is a non-working mode by decision. Selecting it produces a refusal at charge, which is the intended behaviour."
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "chain_reference",
+   "fieldtype": "Check",
+   "label": "Receipts May Carry Txid"
+  },
+  {
+   "default": "0",
+   "fieldname": "loyalty_earn_rate",
+   "fieldtype": "Int",
+   "label": "Loyalty Earn Rate (points per cent)",
+   "description": "0 means earning is not offered. Not the redemption rate, which lives in the contract and cannot change at all."
+  },
+  {
+   "fieldname": "section_receiving",
+   "fieldtype": "Section Break",
+   "label": "Receiving Material"
+  },
+  {
+   "fieldname": "btc_testnet_address",
+   "fieldtype": "Data",
+   "label": "Bitcoin testnet4 Address",
+   "description": "The merchant's own testnet address. Empty means no configured identity, and a sale will record identity_source = none rather than pretend otherwise."
+  },
+  {
+   "fieldname": "section_loyalty",
+   "fieldtype": "Section Break",
+   "label": "Policy Tier (Ootle loyalty)",
+   "description": "EARNING ONLY. Points accrue and cannot be devalued. Spending does not work yet: a redemption needs the customer to co-sign and no wallet in reach can do that. Do not tell a customer they can spend these."
+  },
+  {
+   "default": "0",
+   "fieldname": "loyalty_enabled",
+   "fieldtype": "Check",
+   "label": "Offer Loyalty Points",
+   "description": "Off means no points are offered and no award is attempted. Nothing here can ever fail a sale."
+  },
+  {
+   "default": "https://ootle-indexer-a.tari.com",
+   "fieldname": "ootle_indexer",
+   "fieldtype": "Data",
+   "label": "Ootle Indexer",
+   "description": "Reading is free and keyless. This is the URL a customer can open to check the promise themselves."
+  },
+  {
+   "fieldname": "loyalty_component",
+   "fieldtype": "Data",
+   "label": "Loyalty Component",
+   "description": "Superseded components still resolve and still answer. A wrong address here reads a ledger nobody is being awarded into."
+  },
+  {
+   "fieldname": "column_break_loyalty",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "loyalty_points_resource",
+   "fieldtype": "Data",
+   "label": "Points Resource",
+   "description": "Checked against the resource the component itself names. A mismatch is refused rather than read."
+  },
+  {
+   "fieldname": "award_queue_note",
+   "fieldtype": "HTML",
+   "label": "How Awards Are Written",
+   "options": "<div class=\"text-muted small\">Awards are queued here and written by a drainer running on the host, because the signing key deliberately never enters this container. An award that cannot be written never blocks a sale.</div>"
+  },
+  {
+   "fieldname": "section_erpnext",
+   "fieldtype": "Section Break",
+   "label": "What A Settled Sale Books Into"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Default Customer",
+   "options": "Customer",
+   "description": "Walk-in customer used for the emitted Sales Invoice."
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Default Item",
+   "options": "Item",
+   "description": "The line item a keypad sale books against."
+  },
+  {
+   "fieldname": "column_break_erpnext",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-08-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CryptoPoS",
+ "name": "CryptoPoS Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
