@@ -60,6 +60,10 @@ BIP84_ACCOUNT_VPUB = "vpub5YvMuJNjRSYon44z9QmCfdf8SqJRVNvz6m55Qy5iVjZQxDfUgtiQjn
 # Nothing is ever expected to arrive at these addresses: every sale the harness
 # charges on this rail is left to expire. Who could hold the corresponding
 # private key is therefore not a property this fixture needs.
+# A real testnet4 address, used only to prove the refusal below. Nothing is
+# ever charged to it.
+WATCHED_ADDRESS_BTC = "tb1quyndcxh5sfqv6rm73h47p9vgenlhphq28dc9ga"
+
 HARNESS_ACCOUNT_VPUB = "vpub5Z7wNKS2FP2pFiomoXojA6b3wxqq4ubAT3mdSYumHhqvFRB2BuZQHRrCn7FXmtR38pozTcnigp1qxRfKs44SFFv767WBjGDKaLZJGgbzyxs"
 
 # The BIP publishes these two witness programs as bc1 addresses. These fixed
@@ -554,15 +558,12 @@ def _run_checks():
 		mainnet_refusal or "not refused",
 	)
 
-	btc.reload()
-	btc.testnet_xpub = BIP84_ACCOUNT_VPUB
-	btc.testnet_recipient = BIP84_TESTNET_RECEIVING[0]
-	both_refusal = _refusal_message(lambda: btc.save(ignore_permissions=True))
-	check(
-		"a rail refuses both per-sale and shared receiving material",
-		bool(both_refusal) and "one or the other" in both_refusal.lower(),
-		both_refusal or "not refused",
-	)
+	# The "both bindings at once" rule is deliberately NOT asserted here: it
+	# has become unreachable through any rail that exists. A bitcoin rail
+	# refuses a fixed recipient and every other family refuses a key, so
+	# nothing can hold both. The rule stays in `validate` as the general
+	# statement, and this comment is here so the next reader knows the gap is
+	# a consequence rather than an oversight.
 
 	btc.reload()
 	btc.testnet_recipient = ""
@@ -596,6 +597,7 @@ def _run_checks():
 			pluck="identity_address",
 		)
 	)
+	gap_before = catalog_module.gap_run_for(frappe.get_doc("Crypto Rail", "btc"))
 	btc_first = _charge(5000, "btc")
 	btc_second = _charge(7000, "btc")
 	addresses = (btc_first.identity_address, btc_second.identity_address)
@@ -627,16 +629,20 @@ def _run_checks():
 		btc_sale.db_set("rate_lock_end", add_to_date(now_datetime(), seconds=-1), update_modified=False)
 		watch_module.poll(btc_sale.name)
 		btc_sale.reload()
+	# The run counts the rail's whole recent history, so what this run can
+	# assert is the CHANGE it caused. An absolute would depend on whatever
+	# else the site happens to hold -- which is how this check first broke.
+	gap_after = catalog_module.gap_run_for(frappe.get_doc("Crypto Rail", "btc"))
 	check(
-		"two latest unpaid btc endings make a gap run of two",
-		catalog_module.gap_run_for(btc) == 2,
-		str(catalog_module.gap_run_for(btc)),
+		"two unpaid btc endings lengthen the unused-address run by two",
+		gap_after == gap_before + 2,
+		f"{gap_before} -> {gap_after}",
 	)
 	btc_row = next((row for row in api_module.rails() if row["name"] == "btc"), {})
 	check(
-		"api rails reports the btc gap run",
-		btc_row.get("gap_run") == 2,
-		str(btc_row),
+		"api rails reports the same run the catalog counts",
+		btc_row.get("gap_run") == gap_after,
+		f"{btc_row.get('gap_run')} vs {gap_after}",
 	)
 
 	# ---------------------------------------------------------------
@@ -660,6 +666,85 @@ def _run_checks():
 		all(row["binding"] in ("per-sale", "shared") for row in offered.values()),
 		str({name: row["binding"] for name, row in offered.items()}),
 	)
+	# A single address on a fresh-address rail is virgin until its first
+	# payment: it charges perfectly, takes one payment, and then refuses every
+	# sale afterwards. Refused at configuration time and again at charge time,
+	# because a rail configured before this rule existed is still in the
+	# database -- which is exactly how it was found.
+	trap = frappe.get_doc("Crypto Rail", "btc")
+	trap.testnet_xpub = ""
+	trap.testnet_recipient = WATCHED_ADDRESS_BTC
+	trap_refusal = _refusal_message(lambda: trap.save(ignore_permissions=True))
+	check(
+		"a single address is refused on a rail that derives its own",
+		bool(trap_refusal) and "fresh receiving address" in trap_refusal,
+		trap_refusal or "not refused",
+	)
+	trap.reload()
+	frappe.db.set_value("Crypto Rail", "btc", "testnet_xpub", "", update_modified=False)
+	frappe.db.set_value(
+		"Crypto Rail", "btc", "testnet_recipient", WATCHED_ADDRESS_BTC, update_modified=False
+	)
+	check(
+		"and charging one is refused even if it reached the database",
+		_refuses(lambda: charge_module.charge(5000, "btc")),
+	)
+	frappe.db.set_value("Crypto Rail", "btc", "testnet_recipient", "", update_modified=False)
+	frappe.db.set_value(
+		"Crypto Rail", "btc", "testnet_xpub", HARNESS_ACCOUNT_VPUB, update_modified=False
+	)
+	frappe.db.commit()
+
+	# Two rails sharing one account key both start at index zero and hand out
+	# the SAME address. That is D5's collision again, across assets, and it
+	# reproduced on this site before the rule below existed.
+	# Only one deriving rail exists, so the collision needs a second one made
+	# for the purpose. It is removed again whatever happens.
+	twin_name = "btc-harness-twin"
+	if frappe.db.exists("Crypto Rail", twin_name):
+		frappe.delete_doc("Crypto Rail", twin_name, force=True, ignore_permissions=True)
+	twin = frappe.new_doc("Crypto Rail")
+	twin.update(
+		{
+			"rail_key": twin_name,
+			"label": "Harness twin",
+			"chain": "Bitcoin",
+			"asset": "BTC",
+			"family": "bitcoin",
+			"unit_name": "satoshi",
+			"native_decimals": 8,
+			"display_decimals": 8,
+			"gate_text": "harness fixture; never enabled",
+			"enabled": 0,
+			"testnet_xpub": HARNESS_ACCOUNT_VPUB,
+		}
+	)
+	try:
+		twin_refusal = _refusal_message(lambda: twin.insert(ignore_permissions=True))
+		check(
+			"two rails may not share one account key",
+			bool(twin_refusal) and "already uses this extended public key" in twin_refusal,
+			twin_refusal or "not refused",
+		)
+	finally:
+		if frappe.db.exists("Crypto Rail", twin_name):
+			frappe.delete_doc("Crypto Rail", twin_name, force=True, ignore_permissions=True)
+		frappe.db.commit()
+
+	# And a key on a rail this terminal cannot build addresses for is refused
+	# at the form rather than at the counter. Before this, an EVM rail given a
+	# key derived a bech32 BITCOIN address and offered it as the recipient.
+	nonderiving = frappe.get_doc("Crypto Rail", RAIL)
+	nonderiving.testnet_recipient = ""
+	nonderiving.testnet_xpub = BIP84_ACCOUNT_VPUB
+	nonderiving_refusal = _refusal_message(lambda: nonderiving.save(ignore_permissions=True))
+	check(
+		"a key is refused on a rail whose addresses cannot be derived",
+		bool(nonderiving_refusal) and "cannot derive its own addresses" in nonderiving_refusal,
+		nonderiving_refusal or "not refused",
+	)
+	nonderiving.reload()
+
 	check(
 		"the booking sweep is paused while the harness fabricates settlements",
 		bool(frappe.db.get_value("Scheduled Job Type", {"method": _SWEEP_JOB}, "stopped")),

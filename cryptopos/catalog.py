@@ -91,6 +91,29 @@ def configuration_for(rail, mode):
 	return {"endpoint": endpoint}
 
 
+# Rail families whose adapter requires a receiving address that has never been
+# used. `bitcoin.py`'s `capture_baseline` refuses a recipient with any
+# transaction history, and DECISIONS.md D5 is the seven reasons why that
+# refusal is right.
+#
+# The trap this closes: a single configured address is *virgin* until its first
+# payment, so a rail set up this way charges perfectly, takes one payment, and
+# then refuses every charge afterwards -- mid-shift, at the counter, with an
+# error about transaction history that says nothing about what to do. Refusing
+# at configuration time costs the operator one field and saves them that.
+FRESH_RECIPIENT_FAMILIES = frozenset({"bitcoin"})
+
+# Families for which this terminal can build an address from a derived key.
+# Only BIP-84 P2WPKH exists. See DECISIONS.md D9 for why EVM derivation was
+# proposed and rejected.
+DERIVING_FAMILIES = frozenset({"bitcoin"})
+
+
+def requires_fresh_recipient(rail):
+	"""Does this rail's adapter refuse a reused receiving address?"""
+	return (rail.family or "") in FRESH_RECIPIENT_FAMILIES
+
+
 def recipient_for(rail, mode):
 	"""Where money on this rail is received, in this mode.
 
@@ -100,6 +123,15 @@ def recipient_for(rail, mode):
 	"""
 	if mode == "testnet":
 		xpub = (getattr(rail, "testnet_xpub", "") or "").strip()
+		if xpub and (rail.family or "") not in DERIVING_FAMILIES:
+			frappe.throw(
+				_(
+					"{0} carries an extended public key but this terminal cannot "
+					"build addresses for its chain. Nothing may be charged on it "
+					"until that is corrected."
+				).format(rail.label),
+				title=_("No derivation for this rail"),
+			)
 		if xpub:
 			# This row lock is what serialises address allocation. A scheduler
 			# worker and a cashier request cannot both read the same next index:
@@ -142,7 +174,19 @@ def recipient_for(rail, mode):
 			)
 			rail.next_address_index = index + 1
 			return address
-		return (rail.testnet_recipient or "").strip()
+		recipient = (rail.testnet_recipient or "").strip()
+		if recipient and requires_fresh_recipient(rail):
+			frappe.throw(
+				_(
+					"{0} needs an extended public key, not a single address. Its "
+					"chain requires a fresh receiving address for every payment, "
+					"so one address would work until the first payment arrived "
+					"and refuse every sale after that. Put an account-level "
+					"testnet key in Testnet Xpub and clear Testnet Recipient."
+				).format(rail.label),
+				title=_("This rail derives its own addresses"),
+			)
+		return recipient
 	# Mainnet is refused before this is reached, and demo has no recipient by
 	# design: a demo that quietly borrowed the real address would be a demo
 	# that can take money.

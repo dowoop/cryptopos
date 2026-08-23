@@ -291,3 +291,51 @@ plus 17 expired and 14 parked for review — every one a real ending.
 
 Leaving them would have been the worse error: an oversight surface whose first
 impression is a false million-dollar hole teaches an operator to ignore it.
+
+## D9 · Per-sale addresses on the EVM rails — REJECTED, 2026-08-23
+
+D5 says a shared receiving address cannot be made safe by bookkeeping, and D7
+fixed that for `btc`. The obvious next step — do the same for `eth`,
+`usdc-eth` and `usdc-pol` with BIP-44 and keccak — was attacked and lost.
+
+**The Bitcoin analogy does not carry.** A hundred derived Bitcoin addresses are
+a hundred UTXOs that one signed transaction sweeps. An EVM account cannot be an
+input to somebody else's transaction: each derived address must originate and
+sign its own, and an address holding **only USDC has no ETH to pay the gas**.
+Collecting a hundred small USDC sales means a hundred funding transactions and
+a hundred signed transfers — from a terminal that has no signer at all, by
+design. A small sale can cost more to collect than it contains.
+
+**Two consequences were found in what D7 already shipped, and both reproduced.**
+
+- **Two rails sharing one account key derive the same address.** The index is
+  rail-local, so both start at zero. Measured here: `btc` and `eth` given one
+  key both returned `tb1qjmalnk7asntx02x2r3e30x0p7h3rsc2rs9hvrg`. That is D5's
+  collision again, across assets. A rail now refuses a key another rail holds.
+- **A key on a non-deriving rail produced a Bitcoin address.** Only BIP-84
+  P2WPKH exists here, so an EVM rail given a key was handed a bech32 address as
+  its Ethereum recipient. The adapter refused it at charge time, so it failed
+  safe — but it failed at the counter rather than at the form. Refused at the
+  form now.
+
+**One consequence accepted and not yet fixed.** A payment that confirms after
+its sale expires is invisible: `poll` returns immediately for terminal states,
+the heartbeat selects only in-flight sales, and no later sale watches a
+retired address. On Bitcoin the money is still the operator's — their wallet
+scans the branch — but the terminal never sees it and the customer gets no
+receipt. Named here rather than left to be discovered. On the EVM rails the
+same payment would be stuck as well as invisible, which is part of why this
+was rejected.
+
+**A note on two rules that are now unreachable.** The "both bindings at once"
+refusal can no longer fire through any rail that exists — a bitcoin rail
+refuses a fixed recipient, and every other family refuses a key. It stays in
+`validate` as the general statement, and the harness says in a comment why it
+is not asserted. The twin-key rule needed a second deriving rail to exercise at
+all, so the harness makes one and takes it away again.
+
+**What a real EVM answer would need:** a payment contract or processor binding
+an invoice id and forwarding with customer- or relayer-paid gas, or a complete
+account-management system — global allocation, permanent branch monitoring,
+verified derivation metadata, signer, gas station, sweeper, dust accounting.
+Address generation alone is not the feature.
