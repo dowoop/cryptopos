@@ -70,7 +70,12 @@ class CryptoPosTerminal {
 		const cents = this.cents();
 		if (!cents) return;
 		if (!this.rail) {
+			// Held AND painted. Every other refusal in this method renders
+			// before returning; this one did not, so pressing Charge on a
+			// terminal with no rails did nothing whatsoever on screen -- a
+			// refusal hidden by omission rather than by a closed panel.
 			this.note_error("no rail selected");
+			this.render();
 			return;
 		}
 		this.busy = true;

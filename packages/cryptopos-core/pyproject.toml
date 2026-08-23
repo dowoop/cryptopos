@@ -1,0 +1,109 @@
+[project]
+name = "cryptopos-core"
+description = "Dependency-free, installable blockchain payment rails with explicit test-network identity, payment requests, observation, and settlement."
+readme = "README.md"
+# PEP 639 SPDX form. The deprecated `License :: OSI Approved ::` classifier is
+# deliberately absent -- PEP 639 forbids carrying both, and this is the shape
+# packaging tools read now.
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "the maintainer", email = "dowoop@users.noreply.github.com" }]
+keywords = ["crypto", "point-of-sale", "pos", "payments", "qr", "tari", "ootle", "bitcoin", "ethereum", "address-validation", "bech32", "eip55"]
+
+# The host app targets 3.14, but nothing here needs it -- the whole package is
+# stdlib and carries no syntax newer than 3.9. Pinning a library to the newest
+# interpreter is how a reusable package stops being reusable.
+requires-python = ">=3.9"
+
+# Intentionally empty, and worth defending: everything here is stdlib. A
+# payment terminal that pulls a transitive dependency tree is a payment
+# terminal whose supply chain you no longer know.
+dependencies = []
+
+dynamic = ["version"]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Office/Business :: Financial :: Point-Of-Sale",
+]
+
+[project.entry-points."cryptopos.rails"]
+bitcoin-testnet4 = "cryptopos_core.bitcoin:bitcoin_testnet4"
+ethereum-sepolia-eth = "cryptopos_core.evm:ethereum_sepolia"
+ethereum-sepolia-usdc = "cryptopos_core.evm:usdc_ethereum_sepolia"
+polygon-amoy-usdc = "cryptopos_core.evm:usdc_polygon_amoy"
+
+[project.urls]
+Homepage = "https://github.com/dowoop/cryptopos"
+Source = "https://github.com/dowoop/cryptopos/tree/main/packages/cryptopos-core"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/cryptopos_core/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cryptopos_core"]
+
+# Tests ship in the sdist and not in the wheel. A packager rebuilding from
+# source can run them; a user installing the wheel does not get a `tests`
+# package landing in their site-packages.
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
+
+# `rails.py` is LINTED but not FORMATTED, and the distinction is the point:
+# every rule still runs over it, so a real defect is still caught. What is
+# excluded is only the reflow.
+#
+# The rails table pairs fields on one line on purpose -- `display_decimals`
+# beside `native_decimals`, `sim_block_seconds` beside `real_block_time`. Each
+# pair is two halves of one fact, and reading them together is how a drift
+# between them stays a one-screen read instead of a scavenger hunt. The
+# formatter splits every pair onto its own line and turns a 12-rail table into
+# something you scroll. It also dedents the implicit string concatenations in
+# `maturity_note` to a column that reads as a separate statement.
+#
+# `qrcodegen.py` is here for a different and more serious reason. The
+# `[tool.ruff] exclude` above keeps the LINTER off it, but the formatter does
+# not read that list -- `make fmt` rewrote 774 of its lines, which is exactly
+# the one thing the file must never suffer. Byte-identical to upstream and to
+# the tkinter terminal's copy is the property that makes it the same encoder
+# on every surface, and `test_packaging.VendoredGenerator` only checks the
+# notice survived, not the bytes. Excluded here, where the formatter looks.
+# `README.md` — ruff formats code blocks inside markdown, and this package
+# indents with tabs. That is right for the source and wrong for a README:
+# this file renders on PyPI for people who do not use this codebase, and
+# every Python example they have ever read is indented with four spaces.
+# The house style stops at the package boundary.
+exclude = [
+    "src/cryptopos_core/rails.py",
+    "src/cryptopos_core/qrcodegen.py",
+    "README.md",
+]
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = [
+    "E501",   # long lines: the prose in these docstrings is the point
+    "W191",   # tabs, matching the host app
+    "UP031",  # percent format appears in vendored qrcodegen
+    "UP032",
+]
+
+# Vendored unchanged from Project Nayuki (MIT). Reformatting it would destroy
+# the one property that matters: that it is byte-identical to the copy the
+# tkinter terminal uses, and to upstream.
+exclude = ["src/cryptopos_core/qrcodegen.py"]

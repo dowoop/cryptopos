@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 .ruff_cache/
+dist/
+build/
+.venv/
+.buildenvs/

@@ -8,104 +8,23 @@
  * rare at the counter by construction, which is exactly why they need a
  * check that does not depend on someone reproducing them by hand.
  *
- * This stubs enough of jQuery and frappe to instantiate the class and read
- * the HTML it produces. It asserts on rendered output, not on internals.
+ * This file asserts on RENDERED OUTPUT only -- the HTML a state produces.
+ * What that output does when it is clicked is a different question and is
+ * answered in terminal_button_test.js, against the same stubbed desk.
  */
 
-const fs = require("fs");
-const path = require("path");
-const vm = require("vm");
+const { load, Reporter, sale } = require("./terminal_harness");
 
-const PASS = [];
-const FAIL = [];
+const report = new Reporter("terminal render");
+const check = (rule, condition, detail = "") => report.check(rule, condition, detail);
 
-function check(rule, condition, detail = "") {
-	(condition ? PASS : FAIL).push(rule + (detail ? ` -- ${detail}` : ""));
-}
+const harness = load();
+const Terminal = harness.Terminal;
 
-// ---------------------------------------------------------------------------
-// Just enough of the desk to instantiate the page.
-// ---------------------------------------------------------------------------
-function makeStubs() {
-	let captured = "";
+// The rails call fires from the constructor. Answering it keeps a routing
+// failure from raising a notice on every card this file renders.
+harness.server.answer("cryptopos.api.rails", () => RAILS);
 
-	const chainable = {
-		html(v) {
-			if (v !== undefined) captured = v;
-			return v === undefined ? captured : chainable;
-		},
-		find() {
-			return chainable;
-		},
-		on() {
-			return chainable;
-		},
-		is() {
-			return true;
-		},
-	};
-
-	const $ = () => chainable;
-	$.fn = {};
-
-	const frappe = {
-		// The desk pre-creates frappe.pages[name] before loading the script,
-		// so the stub does the same lazily.
-		pages: new Proxy(
-			{},
-			{
-				get(target, key) {
-					if (!(key in target)) target[key] = {};
-					return target[key];
-				},
-			}
-		),
-		ui: { make_app_page: ({ parent }) => ({ body: parent }) },
-		utils: {
-			escape_html: (s) =>
-				String(s == null ? "" : s).replace(
-					/[&<>"']/g,
-					(c) =>
-						({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
-				),
-		},
-		call: () => Promise.resolve({ message: [] }),
-	};
-
-	const document = {
-		getElementById: () => null,
-		createElement: () => ({ style: {}, setAttribute() {} }),
-		head: { appendChild() {} },
-	};
-
-	return { $, frappe, document, captured: () => captured };
-}
-
-// ---------------------------------------------------------------------------
-// Load the page module into a sandbox.
-// ---------------------------------------------------------------------------
-const source = fs.readFileSync(
-	path.join(__dirname, "..", "cryptopos", "cryptopos", "page", "terminal", "terminal.js"),
-	"utf8"
-);
-
-const stubs = makeStubs();
-const sandbox = {
-	$: stubs.$,
-	frappe: stubs.frappe,
-	document: stubs.document,
-	__: (s) => s,
-	setInterval: () => 1,
-	clearInterval: () => {},
-	console,
-	BigInt,
-};
-sandbox.window = sandbox;
-sandbox.globalThis = sandbox;
-
-// Expose the class by appending an assignment; the file itself does not export.
-vm.runInNewContext(source + "\n;globalThis.__Terminal = CryptoPosTerminal;", sandbox);
-const Terminal = sandbox.__Terminal;
 check("the page module loads and defines the terminal class", typeof Terminal === "function");
 
 // ---------------------------------------------------------------------------
@@ -127,44 +46,6 @@ function terminal() {
 	t.rails = RAILS;
 	t.rail = "btc";
 	return t;
-}
-
-function sale(overrides = {}) {
-	return Object.assign(
-		{
-			name: "CPS-2026-00001",
-			state: "awaiting",
-			state_word: "AWAITING",
-			end_kind: "",
-			review_reason: "",
-			mode: "testnet",
-			provenance: "REAL",
-			uri: "bitcoin:tb1qexample?amount=0.0004",
-			qr_modules: { size: 3, quiet: 4, rows: ["101", "010", "101"] },
-			usd_cents: 4200,
-			invoiced_native: "39685",
-			credited_native: "0",
-			sighted_native: "0",
-			unit_name: "satoshi",
-			gate_text: "confs >= 3 (mainnet; testnet settles at 1)",
-			binding: "shared",
-			identity_source: "config",
-			identity_address: "tb1qexample",
-			rate_microcents: 6400000000,
-			rate_source: "coinbase+kraken",
-			rate_at: "2026-08-15 20:00:00",
-			rate_lock_end: "2026-08-15 20:15:00",
-			tx_id: "",
-			settled_at: "",
-			invoice_id: "INV-20260815-0001",
-			invoice_ref: "K7M2-P9QX-4TWN",
-			sales_invoice: null,
-			bookable: false,
-			not_bookable_because: "not settled (state is awaiting)",
-			events: [],
-		},
-		overrides
-	);
 }
 
 // ---------------------------------------------------------------------------
@@ -401,9 +282,225 @@ function sale(overrides = {}) {
 }
 
 // ---------------------------------------------------------------------------
-console.log("");
-PASS.forEach((line) => console.log(`  PASS  ${line}`));
-FAIL.forEach((line) => console.log(`  FAIL  ${line}`));
-console.log("");
-console.log(`  ${PASS.length} passed, ${FAIL.length} failed`);
-process.exit(FAIL.length ? 1 : 0);
+// ---------------------------------------------------------------------------
+// 8. The values themselves, not merely their labels.
+//
+// Everything in this section exists because a mutation survived. The page is
+// full of `x || ""` fallbacks, and swapping one to `x && ""` renders the
+// FALLBACK in place of the value -- a screen that quietly shows nothing where
+// the URI, the reference or the timestamp should be. Asserting that a block
+// is present says nothing about that; asserting what is IN it does.
+// ---------------------------------------------------------------------------
+{
+	const t = terminal();
+	t.sale = sale();
+	const html = t.awaiting_html();
+
+	check(
+		"the payment URI is rendered as the element's text",
+		html.includes(">bitcoin:tb1qexample?amount=0.0004<"),
+		"the title attribute alone satisfies a bare includes() while the line renders empty"
+	);
+	check("and again as its title, for when the line is truncated", html.includes('title="bitcoin:tb1qexample'));
+	check(
+		"the rate lock shows the time it expires",
+		html.includes("20:15"),
+		"slice(11, 16) of the timestamp -- one character either way is a different claim"
+	);
+	check("and does not spill the date or the seconds into it", !html.includes("20:15:"));
+
+	// The provenance flags are their own block. `includes("testnet")` is not
+	// enough on its own: the gate text says "testnet settles at 1", so that
+	// check passed even with the mode flag suppressed entirely.
+	const flags = html.slice(html.indexOf("cpos-flags"), html.indexOf("cpos-row"));
+	check("a non-mainnet mode is flagged in the flags block", flags.includes("testnet"));
+	check("a shared address is flagged in the flags block", flags.includes("shared address"));
+	check(
+		"a merchant-configured address raises no identity flag",
+		!flags.includes("address not merchant-configured")
+	);
+	check("a REAL provenance is not flagged as simulated", !flags.includes("simulated"));
+	check("a sale that has heard something does not say nothing has answered",
+		!flags.includes("nothing has answered yet"));
+
+	const simulated = terminal();
+	simulated.sale = sale({ mode: "mainnet", provenance: "SIMULATED", identity_source: "derived", binding: "" });
+	const simFlags = simulated.awaiting_html();
+	check("a simulated sale says so", simFlags.includes("simulated"));
+	check("an address the merchant did not configure says so", simFlags.includes("address not merchant-configured"));
+	check("a mainnet sale raises no mode flag", !simFlags.includes(">mainnet<"));
+
+	const silent = terminal();
+	silent.sale = sale({ provenance: "" });
+	check(
+		"a sale nothing has answered about says exactly that",
+		silent.awaiting_html().includes("nothing has answered yet")
+	);
+}
+
+// ---------------------------------------------------------------------------
+// 9. The QR is drawn from what the server sent, including its quiet zone.
+// ---------------------------------------------------------------------------
+{
+	const t = terminal();
+
+	t.sale = sale({ qr_modules: { size: 3, quiet: 2, rows: ["101", "010", "101"] } });
+	check(
+		"the quiet zone the server chose is the one drawn",
+		t.awaiting_html().includes('viewBox="0 0 7 7"'),
+		"3 modules plus 2 either side"
+	);
+
+	t.sale = sale({ qr_modules: { size: 3, rows: ["101", "010", "101"] } });
+	check(
+		"a grid with no quiet zone falls back to the spec's four",
+		t.awaiting_html().includes('viewBox="0 0 11 11"'),
+		"scanners fail intermittently without it, which reads as the customer's phone"
+	);
+
+	check("no modules at all draws nothing rather than a broken svg", t.qr_svg(null) === "");
+	check("an empty grid draws nothing", t.qr_svg({ size: 0, quiet: 4 }) === "");
+}
+
+// ---------------------------------------------------------------------------
+// 10. Formatting, asserted exactly.
+//
+// `includes("$42.00")` is satisfied by "$42.000". Equality is not.
+// ---------------------------------------------------------------------------
+{
+	const t = terminal();
+	check("a whole-dollar amount formats to two places", t.fmt_usd(4200) === "$42.00", t.fmt_usd(4200));
+	check("a zero amount is zero, not a cent", t.fmt_usd(0) === "$0.00", t.fmt_usd(0));
+	check("a missing amount is zero", t.fmt_usd(undefined) === "$0.00", t.fmt_usd(undefined));
+	check("a single cent formats as one", t.fmt_usd(1) === "$0.01", t.fmt_usd(1));
+	check(
+		"a native amount that is not a number is shown as it arrived",
+		t.fmt_native("not-a-number") === "not-a-number",
+		t.fmt_native("not-a-number")
+	);
+	check("a missing native amount reads as zero", t.fmt_native(undefined) === "0", t.fmt_native(undefined));
+}
+
+// ---------------------------------------------------------------------------
+// 11. The ending screen's own values.
+// ---------------------------------------------------------------------------
+{
+	const t = terminal();
+
+	t.sale = sale({ state: "confirmed", end_kind: "clean", sales_invoice: null, bookable: false });
+	let html = t.done_html();
+	check("an unbooked sale says why", html.includes("not settled (state is awaiting)"));
+	check("the sale's own reference is printed", html.includes("INV-20260815-0001"));
+	check("and the customer-facing ref beside it", html.includes("K7M2-P9QX-4TWN"));
+
+	t.sale = sale({ state: "confirmed", end_kind: "over", credited_native: "1000000" });
+	check("an overpayment names the unit both figures are in", t.done_html().includes("satoshi"));
+
+	t.sale = sale({ state: "needs_review", end_kind: "unidentified", sighted_native: "50000" });
+	check("sighted money names its unit too", t.done_html().includes("satoshi"));
+
+	// The sighted block must appear only when something was actually sighted.
+	t.sale = sale({ state: "expired", end_kind: "clean", sighted_native: "0" });
+	check("a sale that sighted nothing renders no sighted block", !t.done_html().includes("cpos-sighted"));
+	t.sale = sale({ state: "expired", end_kind: "clean", sighted_native: "" });
+	check("nor does one with no sighted figure at all", !t.done_html().includes("cpos-sighted"));
+	t.sale = sale({ state: "expired", end_kind: "under", sighted_native: "1" });
+	check("a single sighted unit is still sighted", t.done_html().includes("cpos-sighted"));
+
+	// An ending the table does not know still has to render something.
+	// `state_word` deliberately unlike `state`: with the two the same, every
+	// rung of the `state_word || state || ""` fallback renders the same text
+	// and none of them is actually being tested.
+	t.sale = sale({ state: "voided", state_word: "Written off", end_kind: "" });
+	html = t.done_html();
+	check("an unrecognised ending uses the sale's own word for itself", html.includes("WRITTEN OFF"));
+	check("and not its raw state", !html.includes("VOIDED"));
+
+	t.sale = sale({ state: "voided", state_word: "", end_kind: "" });
+	check(
+		"a sale with no word of its own falls back to its state",
+		t.done_html().includes("VOIDED")
+	);
+}
+
+// ---------------------------------------------------------------------------
+// 12. The panels' contents.
+// ---------------------------------------------------------------------------
+{
+	const t = terminal();
+	t.sale = sale({
+		state: "confirmed",
+		end_kind: "clean",
+		tx_id: "abc123",
+		settled_at: "2026-08-15 20:11:07",
+		events: [
+			// Microseconds on purpose: Frappe writes them, and slice(11, 19)
+			// must cut exactly at the seconds rather than one character past.
+			{ at: "2026-08-15 20:04:31.482913", source: "scheduler", from_state: "awaiting", to_state: "detected", detail: "seen in mempool" },
+		],
+	});
+
+	t.show_bench = true;
+	let html = t.panels_html();
+	check("the bench prints the transaction id", html.includes("abc123"));
+	check("the bench prints the settlement time", html.includes("2026-08-15 20:11:07"));
+	check("the bench prints the end kind", html.includes("clean"));
+	check("the bench prints the binding", html.includes("shared"));
+	check("the bench prints the provenance", html.includes("REAL"));
+
+	t.show_bench = false;
+	t.show_log = true;
+	html = t.panels_html();
+	check("the log prints the time of day only", html.includes("20:04:31"));
+	check("and not the date with it", !html.includes("2026-08-15 20:04:31"));
+	check("nor a stray fraction of a second", !html.includes("20:04:31."));
+	check("the log names the transport that caused the transition", html.includes("scheduler"));
+	check("the log prints the detail", html.includes("seen in mempool"));
+	check("the log prints both states", html.includes("awaiting") && html.includes("detected"));
+
+	// An empty field must read as a dash, not vanish.
+	const bare = terminal();
+	bare.sale = sale({ tx_id: "", settled_at: "", end_kind: "", binding: "", provenance: "" });
+	bare.show_bench = true;
+	check("a bench row with no value shows a dash", bare.panels_html().includes("&mdash;") ||
+		bare.panels_html().includes("—"));
+}
+
+// ---------------------------------------------------------------------------
+// 13. Points, in the shapes the server can actually send.
+// ---------------------------------------------------------------------------
+{
+	const t = terminal();
+	t.sale = sale({ state: "confirmed", end_kind: "clean" });
+
+	const BASE = {
+		reachable: true,
+		facts: { redemption_rate: 100 },
+		earning_only: "EARNING ONLY.",
+		ceilings: [["head", "body"]],
+		check_it_yourself: [["label", "https://example.invalid/x"]],
+	};
+
+	t.loyalty = Object.assign({}, BASE, { award: null });
+	let html = t.done_html();
+	check("a settled sale with no award record says so", html.includes("No award record exists"));
+	check("and does not claim points are held", !html.includes("cpos-award-held"));
+
+	t.loyalty = Object.assign({}, BASE, {
+		award: { state: "refused", wording: "NOT ISSUED.", claims_points: false, reason: "over the per-epoch ceiling" },
+	});
+	check("a refused award shows the reason it was refused",
+		t.done_html().includes("over the per-epoch ceiling"));
+
+	// Reachable, and still unreadable: a different field carries the reason.
+	t.loyalty = { reachable: true, facts: null, unreadable_because: "the state did not parse" };
+	html = t.done_html();
+	check("a reachable but unreadable policy layer claims nothing", html.includes("nothing is claimed about points"));
+	check("and shows the reason it could not be read", html.includes("the state did not parse"));
+
+	t.loyalty = { reachable: false, unreachable_because: "the indexer did not answer" };
+	check("an unreachable one shows its own reason",
+		t.done_html().includes("the indexer did not answer"));
+}
+
+report.report();

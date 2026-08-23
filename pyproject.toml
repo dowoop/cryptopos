@@ -9,6 +9,12 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     # "frappe~=16.0.0" # Installed and managed by bench.
+
+    # The framework-free half of this project, developed in packages/ and
+    # published separately so it can be used without Frappe. In the dev stack
+    # it is on PYTHONPATH from the bind mount rather than installed; an image
+    # build installs it normally.
+    "cryptopos-core>=1.0.0,<2",
 ]
 
 [build-system]
@@ -26,6 +32,11 @@ packages = []
 [tool.ruff]
 line-length = 110
 target-version = "py314"
+
+# `cryptopos_core` is developed in this repo but installed from PyPI in a built
+# image, so nothing on disk tells ruff it is ours. Naming its source root keeps
+# isort grouping it with `cryptopos` instead of with `frappe`.
+src = [".", "packages/cryptopos-core/src"]
 
 [tool.ruff.lint]
 select = [

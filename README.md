@@ -6,7 +6,7 @@ charge → watch → bind → settle → book.
 
 ## What it proves
 
-Two suites, both asserting rather than printing, each check naming the rule it
+Five suites, all asserting rather than printing, each check naming the rule it
 defends:
 
 ```bash
@@ -16,9 +16,56 @@ bench --site erp.localhost execute cryptopos.harness.run
 # policy tier, against the live Ootle contract — 43 checks
 bench --site erp.localhost execute cryptopos.harness_loyalty.run
 
-# terminal render logic, no browser needed — 59 checks
+# what each terminal state looks like — 111 checks
 node tests/terminal_render_test.js
+
+# what happens when it is clicked — 129 checks
+node tests/terminal_button_test.js
+
+# the framework-free core — 579 tests, no network, no bench, under a second
+make test
 ```
+
+Only the first two need the Docker stack. Everything else needs nothing but
+Python and node, which is the point of the split — see
+[DEVELOPMENT.md](DEVELOPMENT.md).
+
+And two further quality gates:
+
+```bash
+make prove   # nothing unexecuted, nothing unclicked, nothing unexplained
+make worth   # break it on purpose; fail if the suites do not notice
+```
+
+`prove` fails if any line of `cryptopos_core` never executes, if any terminal
+method or control is never reached, or if any symbol lacks a row in
+[PROOF.md](PROOF.md). Every inventory is read from the source, so none of them
+can quietly go stale. The expanded payment-rail kernel is back at full
+bytecode-reportable line coverage and its mutation analysis is current.
+
+`worth` asks the harder question. Coverage says a line *ran*; it says nothing
+about whether the test around it asserts anything. So `tools/worth.py` and
+`tools/worth_terminal.js` rewrite one operator or constant at a time, run the
+suites against the rewritten copy, and fail if the code was wrong and nothing
+complained.
+
+```
+cryptopos_core  2,062 lines, 579 tests  100.0% executed  1,809/1,825 mutants killed
+terminal          29 methods, 21 controls  240 checks    132/135 mutants killed
+```
+
+The core records sixteen equivalent mutants and the terminal records three —
+edits that cannot change observable behaviour — each listed with the reason
+it cannot be killed.
+
+Between them the gates found: three rate-feed adapters that had never
+executed; a shielded-Zcash test that passed on a fixture failing one check
+earlier; every terminal click handler unreachable because the jQuery stub
+discarded them; `on_page_load` never called; 48 values in the rails table —
+chain IDs, decimals, settle gates — that could each be changed at will;
+fixtures built from the very constants they were meant to pin; and a Charge
+button that, on a terminal with no rails, refused the sale and **rendered
+nothing at all**.
 
 ## The terminal
 
@@ -289,10 +336,15 @@ different promises, and the port should not upgrade one on the way across.
   here — refund and warranty lines remain local records only.
 - **No receipt.** `receipt.py` and its signed region are not ported, so the
   terminal shows an ending but hands the customer nothing.
-- **The terminal has not been driven in a real browser.** The render logic is
-  covered by `tests/terminal_render_test.js` against a stubbed desk, and the
-  page is served correctly by `frappe.desk.desk_page.getpage`, but no one has
-  clicked it. Layout, focus behaviour and the auto-poll timer are unproven.
-- **No `drive_gui.py` equivalent.** The tkinter tree measures its own claims
-  about what is visible; nothing here does that yet.
+- **The terminal has not been driven in a real browser.** Every control is now
+  clicked and every method run — but against a stubbed desk with a small
+  hand-written DOM (`tests/terminal_harness.js`), not against Chrome. What
+  that harness cannot see is exactly what it does not implement: layout, CSS,
+  focus, real event bubbling, and whether anything is actually *visible*. The
+  page is served correctly by `frappe.desk.desk_page.getpage`; nobody has
+  looked at it.
+- **No `drive_gui.py` equivalent.** `tools/prove_terminal.js` measures whether
+  every part of the page was *exercised*, which is not the same claim as the
+  tkinter tree's — that one measures what is *visible*. Nothing here does that
+  yet, and a stubbed DOM is the wrong place to try.
 - **Mainnet refuses**, by decision, as it does in the original.

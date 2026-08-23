@@ -1,0 +1,77 @@
+name: cryptopos-core
+
+on:
+  push:
+    paths:
+      - "packages/cryptopos-core/**"
+      - "tools/prove.py"
+      - "tools/worth.py"
+      - "PROOF.md"
+      - ".github/workflows/core.yml"
+  pull_request:
+    paths:
+      - "packages/cryptopos-core/**"
+      - "tools/prove.py"
+      - "tools/worth.py"
+      - "PROOF.md"
+      - ".github/workflows/core.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-matrix:
+    name: source / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.11", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test source tree
+        working-directory: packages/cryptopos-core
+        run: PYTHONPATH=src python -m unittest discover -s tests -t . -q
+
+  quality:
+    name: lint, proof, and mutation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - run: python -m pip install ruff==0.16.3
+      - run: ruff check packages/cryptopos-core tools/prove.py tools/worth.py
+      - name: Prove every line and symbol
+        run: PYTHONPATH="$GITHUB_WORKSPACE/packages/cryptopos-core/src" python tools/prove.py
+      - name: Mutation test the core
+        run: python tools/worth.py --jobs 2
+
+  wheel-matrix:
+    name: wheel / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.11", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install build==1.3.0
+      - name: Build wheel and source distribution
+        working-directory: packages/cryptopos-core
+        run: python -m build
+      - name: Install wheel in a clean environment
+        run: |
+          python -m venv /tmp/cryptopos-wheel
+          /tmp/cryptopos-wheel/bin/pip install packages/cryptopos-core/dist/*.whl
+      - name: Test installed wheel
+        working-directory: packages/cryptopos-core
+        run: /tmp/cryptopos-wheel/bin/python -m unittest discover -s tests -t . -q

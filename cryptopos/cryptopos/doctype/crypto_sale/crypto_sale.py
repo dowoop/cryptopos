@@ -24,10 +24,9 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import now_datetime
 
-
 HAPPY_PATH = ("idle", "awaiting", "detected", "confirming", "confirmed")
 DEAD_ENDS = ("expired", "failed", "needs_review")
-TERMINAL = ("confirmed",) + DEAD_ENDS
+TERMINAL = ("confirmed", *DEAD_ENDS)
 
 # What the operator sees. Only two states are renamed, and both because the
 # internal word is wrong at the till: "confirmed" is an engineering claim

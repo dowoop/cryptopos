@@ -1,0 +1,45 @@
+{
+  // Both VS Code and Cursor read this file.
+  //
+  // The interpreter is the repo's own .venv, created by `make dev`. It has
+  // cryptopos_core installed editable, so imports resolve in the editor and
+  // the test explorer without anything on PYTHONPATH.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  "python.testing.unittestEnabled": true,
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestArgs": [
+    "-s",
+    "packages/cryptopos-core/tests",
+    "-t",
+    "packages/cryptopos-core",
+    "-p",
+    "test_*.py"
+  ],
+
+  // Tabs, matching both pyproject.toml ruff configs and every file in the repo.
+  "[python]": {
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4,
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": { "source.organizeImports.ruff": "explicit" }
+  },
+
+  // The Frappe app half imports frappe, which is not installed on this
+  // machine and cannot be -- it lives in the container's bench. Reporting
+  // those as missing is correct but drowns out real findings, so the app
+  // package is left out of analysis and the framework-free half is not.
+  "python.analysis.extraPaths": ["${workspaceFolder}/packages/cryptopos-core/src"],
+  "python.analysis.exclude": ["${workspaceFolder}/cryptopos/**"],
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.ruff_cache": true,
+    "**/*.egg-info": true,
+    "**/.buildenvs": true
+  },
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/.buildenvs/**": true
+  }
+}

@@ -6,15 +6,15 @@ screen is produced by the same encoder that produced it before the port. A QR
 that differs between two surfaces of the same terminal is a defect that only
 shows up at the counter.
 
-What crosses the wire is the module grid, not markup. Frappe sanitises HTML
-in stored text fields and strips exactly the attributes an SVG needs -- `d`
-and `fill` -- leaving a well-formed and completely blank image. Sending the
-bits and drawing them in the browser sidesteps a sanitiser that is right to
-be suspicious of stored markup, and keeps the encoding server-side where the
-vendored library lives.
+What crosses the wire is the module grid, not markup. A host that sanitises
+stored HTML will strip exactly the attributes an SVG needs -- `d` and `fill`
+-- leaving a well-formed and completely blank image. Sending the bits and
+drawing them at the surface sidesteps a sanitiser that is right to be
+suspicious of stored markup, and keeps the encoding next to the vendored
+library rather than reimplemented in whatever renders it.
 """
 
-from cryptopos import qrcodegen
+from . import qrcodegen
 
 # The spec requires four modules of quiet zone. Scanners fail intermittently
 # without it, and intermittently is the worst way for a payment surface to
@@ -35,8 +35,5 @@ def modules_for(text):
 	"""
 	code = qrcodegen.QrCode.encode_text(text, qrcodegen.QrCode.Ecc.MEDIUM)
 	size = code.get_size()
-	rows = [
-		"".join("1" if code.get_module(x, y) else "0" for x in range(size))
-		for y in range(size)
-	]
+	rows = ["".join("1" if code.get_module(x, y) else "0" for x in range(size)) for y in range(size)]
 	return {"size": size, "quiet": QUIET_ZONE_MODULES, "rows": rows}

@@ -16,7 +16,8 @@ import frappe
 from frappe import _
 from frappe.utils import add_to_date, now_datetime
 
-from cryptopos import qr, rates
+from cryptopos import rates
+from cryptopos_core import qr
 
 RATE_LOCK_SECONDS = 15 * 60
 
