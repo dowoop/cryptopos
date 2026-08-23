@@ -1,0 +1,129 @@
+# DECISIONS.md — what was decided, and what it cost to find out
+
+Each entry names a position, says whether it was taken or rejected, and gives
+the evidence. A decision without a reproduction is a preference; those do not
+go here.
+
+---
+
+## D1 · A settled sale that fails to book must be retried — TAKEN, 2026-08-23
+
+`settle.book` was called once, from the watcher, at the instant a sale settled.
+Nothing called it again: `confirmed` is terminal, `poll` returns immediately for
+it, and `heartbeat` selects only sales still in flight. A booking that failed
+stayed failed, in silence, with the money already received.
+
+**Reproduced, not argued.** Pointing the terminal's Item at a name that does not
+exist makes `Sales Invoice.insert()` raise `LinkValidationError`; the sale stays
+`confirmed` with no invoice and nothing re-polls it. Ordinary configuration
+reaches this — a renamed Item, a closed fiscal year, an accounting dimension
+made mandatory this morning.
+
+`book` now catches the ledger's refusal inside a savepoint and writes the reason
+onto the sale; `settle.sweep_unbooked` retries every five minutes;
+`settle.unbooked` (whitelisted as `api.unbooked`) answers the same question for
+an operator.
+
+## D2 · Booking requires a transaction id — TAKEN, 2026-08-23
+
+The booking equation was four terms: mode AND provenance AND state AND
+identity_source. It is now five. A sale nothing can trace back to a transaction
+is not evidence of revenue.
+
+**This is what made D1's sweep safe rather than dangerous.** At the time it was
+written the site held 44 settled sales with no invoice and no `tx_id` — harness
+residue, none of it real money — and a sweep trusting the old four terms would
+have written **$1,101,650** of fiction into the ledger on its first pass. All 16
+sales that genuinely booked satisfy the new equation, so nothing legitimate is
+excluded.
+
+`book` writing `"txid: not recorded"` into the invoice remarks was the tell that
+this was known to be possible and tolerated. The core agrees and always did:
+`SettlementDecision` refuses to be `SETTLED` without credited money *and*
+transaction ids.
+
+## D3 · The app drives `cryptopos_core.catalog`, not its own watcher — TAKEN, 2026-08-23
+
+`charge.py` carried `URI_BUILDERS = {"bitcoin": ...}` and `watch.py` carried
+`WATCHERS = {"bitcoin": ...}`, each with one entry, while the package the app
+already depends on held adapters reaching four live testnets through one
+contract. `cryptopos/catalog.py` is the seam that was missing.
+
+Two defects died with the old code:
+
+- **The charge path used the primitive.** `rates.native_for` divides straight to
+  native precision and can produce an amount no URI can state. Measured across
+  the rail table, **five of twelve rails** disagree with `rails.invoice_amount`
+  — ETH, POL, SOL and XMR by construction, because their display and native
+  decimals differ. On a decimal-amount rail the QR would ask for less than the
+  sale expects. The charge path now uses `invoice_amount`, which rounds once at
+  display precision and then scales.
+- **Attribution was a clock comparison.** The old watcher decided a transaction
+  was eligible by comparing its block timestamp to the charge time. It is now
+  the captured baseline chain position, read before the payer is shown anything.
+
+## D4 · `native` stays an `int` in `tender` records — REJECTED the change, 2026-08-23
+
+Raised in the `tender` library as QUESTIONS.md Q18: make `to_record` emit a
+decimal string because JavaScript loses integers above 2^53. Rejected after
+Codex attacked it, on facts reproduced in this repository:
+
+`charge.py` already writes `str(invoiced_native)`; `crypto_sale.json` types
+every native as `Data`; `terminal.js:607` reads them back with
+`BigInt(value || "0")` under a comment saying *"BigInt because satoshis fit in a
+double and wei does not"*. **This app had already built the correct boundary.**
+Changing the library would also have made `to_record` partial where it is total
+(`str()` raises above 4300 digits) and would have accepted records the very
+JavaScript consumer cannot read (`int("1_000")` is 1000; `BigInt("1_000")`
+throws).
+
+## D5 · A shared receiving address cannot be made safe by bookkeeping — REJECTED the opt-in, 2026-08-23
+
+The `bitcoin:testnet4` adapter refuses `capture_baseline` on an address with any
+transaction history. The app has no per-sale address source, so BTC charging
+refuses outright. The proposal was an explicit opt-in —
+`configuration={"allow_reused_recipient": True}` — on the grounds that
+attribution by captured baseline tip is stronger than the timestamp comparison
+the app used before.
+
+**Rejected.** It is stronger as a statement about mining order and is not a
+payment binding. The decisive sequence needs no misuse at all:
+
+1. An earlier customer broadcasts `T` paying the shared address.
+2. Their sale expires before `T` confirms — so it holds no `tx_id`, and the
+   claimed-transaction defense has nothing to work with.
+3. A new sale captures a baseline at the current tip.
+4. `T` confirms one block later, inside the new sale's window.
+5. It is credited to the new sale, which settles and books.
+6. The new customer paid nothing and walks away.
+
+Late confirmation is ordinary Bitcoin behaviour. Six further sequences were
+given and each holds: overlapping sales are assigned by polling order rather
+than by attribution; `settle` aggregates *every* unclaimed transfer after the
+baseline rather than selecting one matching the invoice; a baseline stores a
+height rather than a block hash, so a reorganisation can lift an old payment
+above it; and the single unpaginated address read cannot even see far enough
+back on a busy address.
+
+The assumption underneath is address exclusivity under another name. A fresh
+address provides it; a shared address does not.
+
+**What this costs, stated plainly.** `btc` is seeded and switched **off**. The
+rail is described and not offered. Restoring it needs a per-sale address source
+— BIP32/BIP84 derivation from an operator xpub, or an address lease — and that
+is the next piece of work on this rail, not a configuration flag.
+
+**Two consequences worth carrying forward.**
+
+- **The EVM adapters do not refuse address reuse**, and their own rail table
+  calls their binding *"static address + exact-amount match in the lock window
+  (weakest)"*. Sequences 1–3 above apply to them too. They are enabled because
+  this terminal is testnet-only by charter and mainnet is refused by decision —
+  **not** because the binding is sound. Anything approaching real money needs
+  per-sale addresses on every rail.
+- **Two defects in the new watcher came out of the same review** and are fixed:
+  it persisted only `decision.transaction_id` and discarded the rest of a
+  multi-transfer settlement, leaving those transactions looking unclaimed to the
+  next sale; and it read the claimed set without holding it, so two workers
+  could both settle on one transaction. The set is now read `FOR UPDATE`, and
+  `identity_address` and `tx_id` are indexed so the lock is on those rows.

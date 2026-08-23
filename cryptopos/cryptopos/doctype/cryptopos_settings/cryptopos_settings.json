@@ -5,7 +5,6 @@
  "doctype": "DocType",
  "editable_grid": 0,
  "engine": "InnoDB",
- "issingle": 1,
  "field_order": [
   "merchant_name",
   "mode",
@@ -30,20 +29,20 @@
  ],
  "fields": [
   {
+   "description": "Self-declared. Snapshotted onto each sale at charge.",
    "fieldname": "merchant_name",
    "fieldtype": "Data",
    "label": "Merchant Trading Name",
-   "reqd": 1,
-   "description": "Self-declared. Snapshotted onto each sale at charge."
+   "reqd": 1
   },
   {
    "default": "testnet",
+   "description": "Mainnet is a non-working mode by decision. Selecting it produces a refusal at charge, which is the intended behaviour.",
    "fieldname": "mode",
    "fieldtype": "Select",
    "label": "Mode",
    "options": "demo\ntestnet\nmainnet",
-   "reqd": 1,
-   "description": "Mainnet is a non-working mode by decision. Selecting it produces a refusal at charge, which is the intended behaviour."
+   "reqd": 1
   },
   {
    "fieldname": "column_break_top",
@@ -57,10 +56,10 @@
   },
   {
    "default": "0",
+   "description": "0 means earning is not offered. Not the redemption rate, which lives in the contract and cannot change at all.",
    "fieldname": "loyalty_earn_rate",
    "fieldtype": "Int",
-   "label": "Loyalty Earn Rate (points per cent)",
-   "description": "0 means earning is not offered. Not the redemption rate, which lives in the contract and cannot change at all."
+   "label": "Loyalty Earn Rate (points per cent)"
   },
   {
    "fieldname": "section_receiving",
@@ -68,46 +67,47 @@
    "label": "Receiving Material"
   },
   {
+   "description": "Moved to Crypto Rail -> btc -> Testnet Recipient. A terminal that charges on several chains needs one receiving address per rail. Kept read-only so the value that was here is still visible; nothing reads it any more.",
    "fieldname": "btc_testnet_address",
    "fieldtype": "Data",
-   "label": "Bitcoin testnet4 Address",
-   "description": "The merchant's own testnet address. Empty means no configured identity, and a sale will record identity_source = none rather than pretend otherwise."
+   "label": "BTC Testnet Address (moved)",
+   "read_only": 1
   },
   {
+   "description": "EARNING ONLY. Points accrue and cannot be devalued. Spending does not work yet: a redemption needs the customer to co-sign and no wallet in reach can do that. Do not tell a customer they can spend these.",
    "fieldname": "section_loyalty",
    "fieldtype": "Section Break",
-   "label": "Policy Tier (Ootle loyalty)",
-   "description": "EARNING ONLY. Points accrue and cannot be devalued. Spending does not work yet: a redemption needs the customer to co-sign and no wallet in reach can do that. Do not tell a customer they can spend these."
+   "label": "Policy Tier (Ootle loyalty)"
   },
   {
    "default": "0",
+   "description": "Off means no points are offered and no award is attempted. Nothing here can ever fail a sale.",
    "fieldname": "loyalty_enabled",
    "fieldtype": "Check",
-   "label": "Offer Loyalty Points",
-   "description": "Off means no points are offered and no award is attempted. Nothing here can ever fail a sale."
+   "label": "Offer Loyalty Points"
   },
   {
    "default": "https://ootle-indexer-a.tari.com",
+   "description": "Reading is free and keyless. This is the URL a customer can open to check the promise themselves.",
    "fieldname": "ootle_indexer",
    "fieldtype": "Data",
-   "label": "Ootle Indexer",
-   "description": "Reading is free and keyless. This is the URL a customer can open to check the promise themselves."
+   "label": "Ootle Indexer"
   },
   {
+   "description": "Superseded components still resolve and still answer. A wrong address here reads a ledger nobody is being awarded into.",
    "fieldname": "loyalty_component",
    "fieldtype": "Data",
-   "label": "Loyalty Component",
-   "description": "Superseded components still resolve and still answer. A wrong address here reads a ledger nobody is being awarded into."
+   "label": "Loyalty Component"
   },
   {
    "fieldname": "column_break_loyalty",
    "fieldtype": "Column Break"
   },
   {
+   "description": "Checked against the resource the component itself names. A mismatch is refused rather than read.",
    "fieldname": "loyalty_points_resource",
    "fieldtype": "Data",
-   "label": "Points Resource",
-   "description": "Checked against the resource the component itself names. A mismatch is refused rather than read."
+   "label": "Points Resource"
   },
   {
    "fieldname": "award_queue_note",
@@ -121,18 +121,18 @@
    "label": "What A Settled Sale Books Into"
   },
   {
+   "description": "Walk-in customer used for the emitted Sales Invoice.",
    "fieldname": "customer",
    "fieldtype": "Link",
    "label": "Default Customer",
-   "options": "Customer",
-   "description": "Walk-in customer used for the emitted Sales Invoice."
+   "options": "Customer"
   },
   {
+   "description": "The line item a keypad sale books against.",
    "fieldname": "item_code",
    "fieldtype": "Link",
    "label": "Default Item",
-   "options": "Item",
-   "description": "The line item a keypad sale books against."
+   "options": "Item"
   },
   {
    "fieldname": "column_break_erpnext",
@@ -152,6 +152,7 @@
   }
  ],
  "index_web_pages_for_search": 0,
+ "issingle": 1,
  "links": [],
  "modified": "2026-08-15 12:00:00.000000",
  "modified_by": "Administrator",

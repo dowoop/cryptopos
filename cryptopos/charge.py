@@ -10,14 +10,16 @@ receipt reprinted next month has to say what the customer was handed.
 
 import json
 import secrets
-from decimal import Decimal
 
 import frappe
 from frappe import _
 from frappe.utils import add_to_date, now_datetime
 
-from cryptopos import rates
+from cryptopos import catalog, rates
 from cryptopos_core import qr
+from cryptopos_core import rails as _core_rails
+from cryptopos_core.errors import CryptoPosError
+from cryptopos_core.plugin import PaymentIntent
 
 RATE_LOCK_SECONDS = 15 * 60
 
@@ -39,12 +41,14 @@ def _invoice_id(when):
 	return f"INV-{stamp}-{counter:04d}"
 
 
-def _bitcoin_uri(address, sats, decimals):
-	whole = (Decimal(sats) / (Decimal(10) ** decimals)).normalize()
-	return f"bitcoin:{address}?amount={whole:f}"
+def _intent_id(sale_reference):
+	"""A stable id for the payment intent this sale is.
 
-
-URI_BUILDERS = {"bitcoin": _bitcoin_uri}
+	The invoice reference, which is already unique per sale and already the
+	thing a customer and a cashier say out loud. Lowercased because the
+	plugin contract's identifier grammar is lowercase ASCII.
+	"""
+	return sale_reference.lower()
 
 
 def charge(usd_cents, rail_key, loyalty_account=""):
@@ -77,16 +81,21 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 
 	endpoint = rail.endpoint_for(mode)
 
+	# The adapter, and proof it can do the whole job through the endpoint this
+	# deployment configured. Not what the rail is -- what it can do here.
+	# Three public Sepolia endpoints were measured and only one of them
+	# supported observation, so a rail that is charge-ready in the catalog can
+	# be request-only on the operator's own connection.
+	adapter = catalog.require_chargeable(rail, mode)
+	configuration = catalog.configuration_for(rail, mode)
+
 	# Where the money goes, and whose it is. Stated positively -- "the
 	# operator configured this" -- because the negative form was defeated
 	# once already by editing four version bytes.
-	address = (settings.btc_testnet_address or "").strip() if rail.family == "bitcoin" else ""
-	if address:
-		identity_source = "config"
-	else:
-		identity_source = "none"
+	address = catalog.recipient_for(rail, mode)
+	identity_source = "config" if address else "none"
 
-	if identity_source == "none" and mode != "demo":
+	if identity_source == "none":
 		frappe.throw(
 			_(
 				"No receiving address is configured for {0}. A sale charged now "
@@ -95,19 +104,55 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 			title=_("No receiving material"),
 		)
 
+	try:
+		adapter.validate_recipient(address)
+	except CryptoPosError as exception:
+		frappe.throw(str(exception), title=_("Receiving address refused"))
+
 	rate_microcents, rate_source, feed_answered = rates.quote(rail.asset, mode)
 	rate_at = now_datetime()
 
-	invoiced_native = rates.native_for(usd_cents, rate_microcents, rail.native_decimals)
+	# `rails.invoice_amount`, never `rates.native_for`. The primitive divides
+	# straight to native precision and can produce an amount no URI can state:
+	# on ETH, POL, SOL and XMR the display and native decimals differ, and the
+	# QR would ask for less than the sale expects. Measured across the rail
+	# table, five of twelve rails disagree between the two. `invoice_amount`
+	# rounds once at display precision and then scales, so whatever comes back
+	# is exactly what the payment request will say.
+	try:
+		invoiced_native = _core_rails.invoice_amount(
+			_core_rails.rail_for(rail.rail_key), usd_cents, rate_microcents
+		)
+	except CryptoPosError as exception:
+		frappe.throw(str(exception), title=_("Cannot invoice this amount"))
 	if invoiced_native <= 0:
 		frappe.throw(_("That amount rounds to zero {0}.").format(rail.unit_name))
 
 	charged_at = now_datetime()
+	invoice_ref = _invoice_ref()
 
-	builder = URI_BUILDERS.get(rail.family)
-	if builder is None:
-		frappe.throw(_("No URI builder for rail family {0}.").format(rail.family))
-	uri = builder(address, invoiced_native, rail.native_decimals)
+	# The baseline is read BEFORE the payer is shown anything, and it is what
+	# makes attribution possible on a shared address: everything after this
+	# chain position is a candidate, everything at or before it is somebody
+	# else's. The old watcher approximated this by comparing block timestamps
+	# against the charge time, which is a clock comparison standing in for a
+	# chain fact.
+	try:
+		baseline = adapter.capture_baseline(address, configuration)
+		intent = PaymentIntent(
+			intent_id=_intent_id(invoice_ref),
+			rail_key=adapter.key,
+			recipient=address,
+			amount_native=invoiced_native,
+			created_at_epoch=int(charged_at.timestamp()),
+			expires_at_epoch=int(charged_at.timestamp()) + RATE_LOCK_SECONDS,
+			payment_reference=invoice_ref,
+			baseline=baseline,
+		)
+		request = adapter.create_request(intent)
+	except CryptoPosError as exception:
+		frappe.throw(str(exception), title=_("Cannot request payment on this rail"))
+	uri = request.uri
 
 	sale = frappe.new_doc("Crypto Sale")
 	sale.update(
@@ -134,11 +179,24 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 			"identity_address": address,
 			"identity_source": identity_source,
 			"binding": "shared" if identity_source == "config" else "",
-			"identity_extras": json.dumps({"endpoint": endpoint, "gate": rail.gate_for(mode)}),
+			# The intent, written once and never again, exactly like every
+			# other snapshot on this record. The watcher rebuilds it from
+			# here rather than re-deriving it, because a baseline re-read on
+			# a later heartbeat would be a different chain position and would
+			# quietly re-attribute money that arrived in between.
+			"identity_extras": json.dumps(
+				{
+					"endpoint": endpoint,
+					"gate": rail.gate_for(mode),
+					"catalog_key": adapter.key,
+					"intent": catalog.intent_to_record(intent),
+					"payer_notice": request.payer_notice,
+				}
+			),
 			"uri": uri,
 			"qr_modules": json.dumps(qr.modules_for(uri)),
 			"invoice_id": _invoice_id(charged_at),
-			"invoice_ref": _invoice_ref(),
+			"invoice_ref": invoice_ref,
 			"loyalty_earn_rate": settings.loyalty_earn_rate or 0,
 			"loyalty_account": loyalty_account or "",
 		}

@@ -16,14 +16,30 @@ import json
 import frappe
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
+from cryptopos import api as api_module
 from cryptopos import charge as charge_module
 from cryptopos import settle as settle_module
 from cryptopos import watch as watch_module
 from cryptopos.cryptopos.doctype.crypto_sale.crypto_sale import IllegalTransition
 
-# A real testnet4 address carrying a real confirmed payment. Nothing here
-# signs or spends -- the terminal is watch-only and so is this harness.
-WATCHED_ADDRESS = "tb1quyndcxh5sfqv6rm73h47p9vgenlhphq28dc9ga"
+# The rail this harness charges on. Ethereum Sepolia, because it is one of
+# the rails this terminal actually offers -- `btc` is seeded switched off,
+# and section 9 is where that is asserted rather than assumed. See
+# DECISIONS.md D5.
+RAIL = "eth"
+
+# A real Sepolia address. Nothing here signs or spends: the terminal is
+# watch-only and so is this harness, which is also why no section asserts
+# that a payment arrived. Nobody sends one.
+WATCHED_ADDRESS = "0x25C5f1f6EFf347D0E0c49021B157759331325019"
+
+# A transaction id shaped like the chain's own, for the sections that need a
+# settled sale in order to test BOOKING rather than observation. It is
+# labelled in every event it produces, and `_cleanup` removes every sale and
+# invoice this harness creates -- the site once held 44 abandoned harness
+# sales, and a test that leaves ledger-shaped residue behind is a test that
+# will eventually be mistaken for revenue.
+HARNESS_TX_ID = "0x" + "ha12e5" * 10 + "abcd"
 
 PASS = []
 FAIL = []
@@ -31,6 +47,15 @@ FAIL = []
 
 def check(rule, condition, detail=""):
 	(PASS if condition else FAIL).append(f"{rule}{(' -- ' + detail) if detail else ''}")
+
+
+def _refuses(action):
+	"""True if `action` raised. A refusal is a result, and is asserted as one."""
+	try:
+		action()
+	except Exception:
+		return True
+	return False
 
 
 def _ensure_prerequisites():
@@ -61,13 +86,74 @@ def _ensure_prerequisites():
 	settings.merchant_name = "CryptoPoS Terminal"
 	settings.mode = "testnet"
 	settings.chain_reference = 1
-	settings.btc_testnet_address = WATCHED_ADDRESS
 	settings.customer = "CryptoPoS Walk-in"
 	settings.item_code = "CRYPTOPOS-SALE"
 	settings.company = company
 	settings.save(ignore_permissions=True)
+
+	# The receiving address lives on the rail now. Borrowed and given back
+	# by `_snapshot_settings` / `_restore_settings`, same as the rest.
+	frappe.db.set_value(
+		"Crypto Rail", RAIL, "testnet_recipient", WATCHED_ADDRESS, update_modified=False
+	)
 	frappe.db.commit()
 	return company
+
+
+_CREATED = []
+
+
+def _charge(usd_cents, rail_key=None):
+	"""Charge, and remember the sale so `_cleanup` can take it away again."""
+	sale = charge_module.charge(usd_cents, rail_key or RAIL)
+	_CREATED.append(sale.name)
+	return sale
+
+
+def _settle_by_hand(sale, credited_native, tx_id=HARNESS_TX_ID):
+	"""Drive a sale to settled without a payment, to test what comes after.
+
+	**This is not an observation and never claims to be.** Nothing signs or
+	sends here, so no payment ever arrives, and the sections that test
+	BOOKING would otherwise have nothing to book. The source on every event
+	it writes says `harness`, which is exactly how the 44 abandoned sales
+	this file used to leave behind were identified later.
+	"""
+	sale.db_set("provenance", "REAL", update_modified=False)
+	sale.db_set("tx_id", tx_id, update_modified=False)
+	sale.db_set("credited_native", str(credited_native), update_modified=False)
+	sale.reload()
+	sale.transition_to(
+		"confirmed",
+		source="harness",
+		detail="settled by the harness; no payment was observed",
+		end_kind="over" if credited_native > int(sale.invoiced_native) else "clean",
+		settled_at=now_datetime(),
+	)
+	sale.save(ignore_permissions=True)
+	return sale
+
+
+def _cleanup():
+	"""Remove every sale and invoice this run created.
+
+	A harness that leaves settled-looking sales behind is a harness whose
+	residue is indistinguishable from revenue. This site carried 44 of them
+	for eight days.
+	"""
+	for name in _CREATED:
+		if not frappe.db.exists("Crypto Sale", name):
+			continue
+		invoice = frappe.db.get_value("Crypto Sale", name, "sales_invoice")
+		frappe.db.set_value("Crypto Sale", name, "sales_invoice", None, update_modified=False)
+		if invoice and frappe.db.exists("Sales Invoice", invoice):
+			document = frappe.get_doc("Sales Invoice", invoice)
+			if document.docstatus == 1:
+				document.cancel()
+			frappe.delete_doc("Sales Invoice", invoice, force=True, ignore_permissions=True)
+		frappe.delete_doc("Crypto Sale", name, force=True, ignore_permissions=True)
+	frappe.db.commit()
+	_CREATED.clear()
 
 
 # Everything _ensure_prerequisites writes over. The harness has to aim the
@@ -75,27 +161,42 @@ def _ensure_prerequisites():
 # where the operator's money goes: borrowing it for a test run and keeping it
 # leaves a merchant watching an address they do not hold the keys to, with
 # nothing on any screen to say so. It is given back.
+#
+# The receiving address is on the rail now, not in settings -- one address
+# per rail, because an address is a fact about a chain -- so the borrowing is
+# in two parts and both are given back together.
 _BORROWED_SETTINGS = (
 	"merchant_name",
 	"mode",
 	"chain_reference",
-	"btc_testnet_address",
 	"customer",
 	"item_code",
 	"company",
 )
 
+_BORROWED_RAIL_FIELDS = ("testnet_recipient",)
+
 
 def _snapshot_settings():
 	settings = frappe.get_single("CryptoPoS Settings")
-	return {field: settings.get(field) for field in _BORROWED_SETTINGS}
+	borrowed = {field: settings.get(field) for field in _BORROWED_SETTINGS}
+	rails = {}
+	for name in frappe.get_all("Crypto Rail", pluck="name"):
+		rail = frappe.get_doc("Crypto Rail", name)
+		rails[name] = {field: rail.get(field) for field in _BORROWED_RAIL_FIELDS}
+	return {"settings": borrowed, "rails": rails}
 
 
 def _restore_settings(snapshot):
 	settings = frappe.get_single("CryptoPoS Settings")
-	for field, value in snapshot.items():
+	for field, value in snapshot["settings"].items():
 		settings.set(field, value)
 	settings.save(ignore_permissions=True)
+	for name, fields in snapshot["rails"].items():
+		if not frappe.db.exists("Crypto Rail", name):
+			continue
+		for field, value in fields.items():
+			frappe.db.set_value("Crypto Rail", name, field, value, update_modified=False)
 	frappe.db.commit()
 
 
@@ -109,6 +210,7 @@ def run():
 	try:
 		return _run_checks()
 	finally:
+		_cleanup()
 		_restore_settings(borrowed)
 
 
@@ -120,7 +222,7 @@ def _run_checks():
 	# ---------------------------------------------------------------
 	# 1. Charge snapshots everything, and claims nothing yet.
 	# ---------------------------------------------------------------
-	sale = charge_module.charge(5000, "btc")
+	sale = _charge(5000)
 	check("charge produces a sale in awaiting", sale.state == "awaiting", sale.state)
 	check("charge snapshots the mode onto the sale", sale.mode == "testnet", sale.mode)
 	check(
@@ -150,15 +252,15 @@ def _run_checks():
 		check("awaiting -> idle is refused", True)
 
 	# ---------------------------------------------------------------
-	# 3. The watcher reaches the real chain.
+	# 3. The watcher reaches the real chain, and claims nothing it did
+	#    not see.
 	# ---------------------------------------------------------------
-	# The confirmed payment on this address predates the charge, and the
-	# watcher correctly refuses to treat an older transaction as payment for
-	# a newer sale. Backdating the charge is what makes it eligible -- it is
-	# the sale that moves, never the rule.
-	sale.db_set("charged_at", add_to_date(now_datetime(), days=-30), update_modified=False)
-	sale.reload()
-
+	# Nobody pays this sale -- the terminal is watch-only and so is this
+	# harness -- so the entire assertion is that a real network answered and
+	# that answering produced no claim of payment. A watcher that settled
+	# here would be inventing money, which is the failure this section
+	# exists to catch.
+	before = sale.state
 	watch_module.poll(sale.name)
 	sale.reload()
 
@@ -168,30 +270,40 @@ def _run_checks():
 		f"got {sale.provenance!r}",
 	)
 	check(
-		"the watcher bound a real transaction",
-		bool(sale.tx_id),
-		f"tx_id={sale.tx_id!r} state={sale.state}",
+		"the look records the chain position it reached",
+		isinstance(sale.scratch().get("tip"), int) and sale.scratch()["tip"] > 0,
+		str(sale.scratch()),
 	)
 	check(
-		"bound money is recorded as credited",
-		int(sale.credited_native or 0) > 0,
-		sale.credited_native,
+		"observation starts from the baseline captured at charge time",
+		sale.scratch().get("baseline_tip") == sale.extras()["intent"]["baseline"]["tip"],
+		f"{sale.scratch().get('baseline_tip')} vs {sale.extras()['intent']['baseline']['tip']}",
 	)
 	check(
-		"a payment past the gate settles",
-		sale.state == "confirmed",
-		f"state={sale.state} end_kind={sale.end_kind}",
+		"an unpaid sale is not settled by being looked at",
+		sale.state == before and not sale.tx_id,
+		f"state={sale.state} tx_id={sale.tx_id!r}",
 	)
-	check(
-		"an overpayment is named as one",
-		sale.end_kind == "over",
-		f"end_kind={sale.end_kind}",
-	)
-	check("a settled sale records when the money arrived", bool(sale.settled_at))
+	check("nothing was credited", int(sale.credited_native or 0) == 0, sale.credited_native)
 
 	# ---------------------------------------------------------------
 	# 4. Booking, and only then.
 	# ---------------------------------------------------------------
+	# Settled by hand, because nothing here can make a payment. What is
+	# under test below is what happens AFTER settlement, and that half is
+	# real.
+	_settle_by_hand(sale, int(sale.invoiced_native) + 1)
+	sale.reload()
+	check(
+		"a settled sale records when the money arrived",
+		bool(sale.settled_at),
+		f"settled_at={sale.settled_at!r}",
+	)
+	check("an overpayment is named as one", sale.end_kind == "over", f"end_kind={sale.end_kind}")
+
+	from cryptopos import settle as _settle
+
+	_settle.book(sale)
 	sale.reload()
 	check(
 		"a settled bound real sale books an invoice",
@@ -225,13 +337,26 @@ def _run_checks():
 	# ---------------------------------------------------------------
 	sources = {event.source for event in sale.events}
 	check("every transition is attributed to a source", "" not in sources, str(sources))
-	check("the chain transport appears in the trail", "esplora-rest" in sources, str(sources))
+	# Transitions are what the event trail records, so a heartbeat that
+	# reached the chain and found nothing appears nowhere in it. Which
+	# provider answered, and when, is recorded on the sale's scratchpad
+	# instead -- and that distinction is the point: "looked, saw nothing"
+	# and "never looked" must not read the same.
+	check(
+		"the sale records which provider answered",
+		bool(sale.scratch().get("provider")),
+		str(sale.scratch()),
+	)
+	check(
+		"and which rail answered for it",
+		sale.scratch().get("rail") == sale.extras().get("catalog_key"),
+		f"{sale.scratch().get('rail')!r} vs {sale.extras().get('catalog_key')!r}",
+	)
 
 	# ---------------------------------------------------------------
 	# 6. An unpaid sale ends as expired, not as failed.
 	# ---------------------------------------------------------------
-	unpaid = charge_module.charge(7000, "btc")
-	unpaid.db_set("identity_address", "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", update_modified=False)
+	unpaid = _charge(7000)
 	unpaid.db_set("rate_lock_end", add_to_date(now_datetime(), seconds=-1), update_modified=False)
 	unpaid.reload()
 	watch_module.poll(unpaid.name)
@@ -247,7 +372,7 @@ def _run_checks():
 	# ---------------------------------------------------------------
 	# 7. An unreachable chain does not become a claim about the world.
 	# ---------------------------------------------------------------
-	blind = charge_module.charge(9000, "btc")
+	blind = _charge(9000)
 	extras = blind.extras()
 	extras["endpoint"] = "https://127.0.0.1:9/does-not-exist"
 	blind.db_set("identity_extras", json.dumps(extras), update_modified=False)
@@ -276,15 +401,14 @@ def _run_checks():
 	# nothing to do with the sale. `confirmed` is terminal and the heartbeat
 	# does not poll it, so before the sweep existed such a sale stayed
 	# unbooked forever, in silence, with the money already received.
-	retried = charge_module.charge(5000, "btc")
-	retried.db_set("charged_at", add_to_date(now_datetime(), days=-30), update_modified=False)
-	retried.reload()
+	retried = _charge(5000)
 
 	settings = frappe.get_single("CryptoPoS Settings")
 	settings.db_set("item_code", "CRYPTOPOS-NO-SUCH-ITEM", update_modified=False)
 	frappe.clear_document_cache("CryptoPoS Settings", "CryptoPoS Settings")
 
-	watch_module.poll(retried.name)
+	_settle_by_hand(retried, int(retried.invoiced_native))
+	settle_module.book(retried)
 	retried.reload()
 	check(
 		"a sale settles even when the ledger refuses it",
@@ -327,11 +451,8 @@ def _run_checks():
 	# to a transaction is not evidence of revenue, and must never book --
 	# this site held 44 such sales when the sweep was written, worth
 	# $1,101,650 of fiction had the sweep trusted the old four terms.
-	untraceable = charge_module.charge(5000, "btc")
-	untraceable.db_set("charged_at", add_to_date(now_datetime(), days=-30), update_modified=False)
-	untraceable.reload()
-	watch_module.poll(untraceable.name)
-	untraceable.reload()
+	untraceable = _charge(5000)
+	_settle_by_hand(untraceable, int(untraceable.invoiced_native))
 	untraceable.db_set("sales_invoice", None, update_modified=False)
 	untraceable.db_set("tx_id", "", update_modified=False)
 	untraceable.reload()
@@ -341,6 +462,33 @@ def _run_checks():
 		"and the sweep leaves it alone",
 		settle_module.sweep_unbooked()["booked"] == 0
 		or not frappe.db.get_value("Crypto Sale", untraceable.name, "sales_invoice"),
+	)
+
+	# ---------------------------------------------------------------
+	# 9. A rail that cannot bind safely is described and not offered.
+	# ---------------------------------------------------------------
+	# `btc` is seeded switched off because its adapter refuses a receiving
+	# address that has any history, and this terminal has no per-sale
+	# address source. Asserted rather than assumed: a later change that
+	# quietly switched it back on would take money it cannot attribute.
+	# DECISIONS.md D5 has the seven sequences that settled this.
+	check(
+		"btc is present, and is not on offer",
+		frappe.db.exists("Crypto Rail", "btc")
+		and not frappe.db.get_value("Crypto Rail", "btc", "enabled"),
+		f"enabled={frappe.db.get_value('Crypto Rail', 'btc', 'enabled')!r}",
+	)
+	check(
+		"charging a rail that is off is refused",
+		_refuses(lambda: charge_module.charge(5000, "btc")),
+	)
+	check(
+		"the rails an operator is offered are the ones that work",
+		all(
+			frappe.db.get_value("Crypto Rail", row["name"], "catalog_key")
+			for row in api_module.rails()
+		),
+		str([row["name"] for row in api_module.rails()]),
 	)
 
 	frappe.db.commit()

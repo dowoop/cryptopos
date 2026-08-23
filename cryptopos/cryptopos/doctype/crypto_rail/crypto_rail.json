@@ -13,6 +13,7 @@
   "chain",
   "asset",
   "family",
+  "catalog_key",
   "column_break_units",
   "unit_name",
   "native_decimals",
@@ -29,6 +30,7 @@
   "testnet_url",
   "testnet_transport",
   "testnet_name",
+  "testnet_recipient",
   "column_break_endpoints",
   "live_url",
   "real_transport",
@@ -36,13 +38,13 @@
  ],
  "fields": [
   {
+   "description": "Short stable identifier, e.g. btc. Referenced by every sale.",
    "fieldname": "rail_key",
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Rail Key",
    "reqd": 1,
-   "unique": 1,
-   "description": "Short stable identifier, e.g. btc. Referenced by every sale."
+   "unique": 1
   },
   {
    "fieldname": "label",
@@ -72,22 +74,22 @@
    "reqd": 1
   },
   {
+   "description": "Selects which watcher implementation handles this rail.",
    "fieldname": "family",
    "fieldtype": "Select",
    "label": "Family",
    "options": "bitcoin\nevm-native\nevm-erc20\nsolana\nmonero\nzcash\ntari\nootle",
-   "reqd": 1,
-   "description": "Selects which watcher implementation handles this rail."
+   "reqd": 1
   },
   {
    "fieldname": "column_break_units",
    "fieldtype": "Column Break"
   },
   {
+   "description": "satoshi, wei, lamport ...",
    "fieldname": "unit_name",
    "fieldtype": "Data",
-   "label": "Native Unit Name",
-   "description": "satoshi, wei, lamport ..."
+   "label": "Native Unit Name"
   },
   {
    "fieldname": "native_decimals",
@@ -112,33 +114,33 @@
    "reqd": 1
   },
   {
+   "description": "Chains settle differently on their testnets. Blank falls back to the mainnet figure.",
    "fieldname": "testnet_gate_confs",
    "fieldtype": "Int",
-   "label": "Testnet Gate Confirmations",
-   "description": "Chains settle differently on their testnets. Blank falls back to the mainnet figure."
+   "label": "Testnet Gate Confirmations"
   },
   {
+   "description": "The ceiling as shown to the operator, beside the promise it bounds.",
    "fieldname": "gate_text",
    "fieldtype": "Small Text",
-   "label": "Gate Text",
-   "description": "The ceiling as shown to the operator, beside the promise it bounds."
+   "label": "Gate Text"
   },
   {
    "fieldname": "column_break_gate",
    "fieldtype": "Column Break"
   },
   {
+   "description": "How strongly arriving money can be tied to one sale.",
    "fieldname": "binding_text",
    "fieldtype": "Small Text",
-   "label": "Binding",
-   "description": "How strongly arriving money can be tied to one sale."
+   "label": "Binding"
   },
   {
+   "default": "planned",
    "fieldname": "maturity",
    "fieldtype": "Select",
    "label": "Maturity",
-   "options": "planned\npartial\nworks",
-   "default": "planned"
+   "options": "planned\npartial\nworks"
   },
   {
    "fieldname": "maturity_note",
@@ -156,10 +158,10 @@
    "label": "Testnet URL"
   },
   {
+   "description": "esplora-rest, json-rpc ...",
    "fieldname": "testnet_transport",
    "fieldtype": "Data",
-   "label": "Testnet Transport",
-   "description": "esplora-rest, json-rpc ..."
+   "label": "Testnet Transport"
   },
   {
    "fieldname": "testnet_name",
@@ -171,22 +173,34 @@
    "fieldtype": "Column Break"
   },
   {
+   "description": "Empty means no endpoint. Mainnet is a non-working mode by decision; a sale may not be charged there.",
    "fieldname": "live_url",
    "fieldtype": "Data",
-   "label": "Mainnet URL",
-   "description": "Empty means no endpoint. Mainnet is a non-working mode by decision; a sale may not be charged there."
+   "label": "Mainnet URL"
   },
   {
+   "description": "What a production deployment would ride. Names a pattern, not a layer that exists here.",
    "fieldname": "real_transport",
    "fieldtype": "Small Text",
-   "label": "Real Transport",
-   "description": "What a production deployment would ride. Names a pattern, not a layer that exists here."
+   "label": "Real Transport"
   },
   {
+   "default": "15",
    "fieldname": "sim_block_seconds",
    "fieldtype": "Int",
-   "label": "Simulated Block Seconds",
-   "default": "15"
+   "label": "Simulated Block Seconds"
+  },
+  {
+   "description": "The concrete rail this row drives, as cryptopos_core.catalog names it, e.g. ethereum:sepolia/native:eth. Empty means this rail has no adapter and cannot be charged.",
+   "fieldname": "catalog_key",
+   "fieldtype": "Data",
+   "label": "Catalog Key"
+  },
+  {
+   "description": "Where money on this rail is received on testnet. One address per rail: an address is a fact about a chain, not about the terminal.",
+   "fieldname": "testnet_recipient",
+   "fieldtype": "Data",
+   "label": "Testnet Recipient"
   }
  ],
  "index_web_pages_for_search": 1,

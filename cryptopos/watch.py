@@ -16,134 +16,77 @@ did not make an observation that supports it.
 """
 
 import json
-import urllib.error
-import urllib.request
 
 import frappe
 from frappe.utils import get_datetime, now_datetime
 
-HTTP_TIMEOUT_SECONDS = 10
-
-# A heartbeat walks at most this many transactions on an address. A busy
-# shared address is a performance question, not a correctness one -- but an
-# unbounded walk on a merchant address with years of history would hang the
-# worker, so the cap is stated rather than assumed.
-MAX_TXS_SCANNED = 50
+from cryptopos import catalog
+from cryptopos_core.plugin import NEEDS_REVIEW, SETTLED
 
 
 class ChainUnreachable(Exception):
-	"""The question could not be asked. Not the same as a negative answer."""
+	"""The question could not be asked. Not the same as a negative answer.
 
-
-def _get_json(url):
-	try:
-		request = urllib.request.Request(url, headers={"User-Agent": "cryptopos/0.0.1"})
-		with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-			return json.loads(response.read().decode("utf-8"))
-	except (urllib.error.URLError, OSError, ValueError) as exception:
-		raise ChainUnreachable(str(exception)) from exception
-
-
-def _get_text(url):
-	try:
-		request = urllib.request.Request(url, headers={"User-Agent": "cryptopos/0.0.1"})
-		with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-			return response.read().decode("utf-8").strip()
-	except (urllib.error.URLError, OSError) as exception:
-		raise ChainUnreachable(str(exception)) from exception
-
-
-def _claimed_elsewhere(tx_id, sale_name):
-	"""Has another sale already bound this transaction?
-
-	On a shared receiving address two sales for the same amount inside the
-	same window are indistinguishable by amount alone. First binder wins and
-	the second must not book the same coins twice -- it parks instead.
+	Kept as the name the terminal uses for that third answer. The reads
+	themselves now belong to the rail adapters, which raise their own
+	`CryptoPosError` subclasses; this is what the app calls the category.
 	"""
-	if not tx_id:
-		return False
-	other = frappe.db.exists(
-		"Crypto Sale", {"tx_id": tx_id, "name": ("!=", sale_name)}
-	)
-	return bool(other)
 
 
-def _credit_to(tx, address):
-	"""Sum the outputs of `tx` that pay `address`, in satoshis."""
-	total = 0
-	for output in tx.get("vout", []):
-		if output.get("scriptpubkey_address") == address:
-			total += int(output.get("value", 0))
-	return total
+def _claimed_transaction_ids(sale):
+	"""Every transaction other sales at this address have already bound.
 
+	**All of them, not just each sale's headline `tx_id`.** A settlement can
+	be made of several transfers -- a customer who pays 600 and then 400
+	against a 1,000 invoice settles on two -- and `SettlementDecision`
+	returns every id it credited. Reading only `tx_id` back would leave the
+	second transfer looking unclaimed, so a later sale at the same address
+	could credit itself with money already booked. `tx_id` remains the one a
+	receipt prints; the full set is what the defense is made of.
 
-def watch_bitcoin_esplora(sale, rail):
-	"""One look at the chain for one Bitcoin-family sale.
-
-	Returns a dict of observations. Raises ChainUnreachable if the endpoint
-	did not answer -- the caller decides what an unanswered look means, and
-	that decision depends on whether the lock has run out.
+	This is a defense, not a proof of exclusivity. See DECISIONS.md on
+	per-sale addresses: a shared address cannot be made safe by bookkeeping.
 	"""
-	endpoint = sale.extras().get("endpoint")
-	if not endpoint:
-		raise ChainUnreachable("no endpoint configured for this rail and mode")
-
-	address = sale.identity_address
-	tip = int(_get_text(f"{endpoint}/blocks/tip/height"))
-	txs = _get_json(f"{endpoint}/address/{address}/txs")[:MAX_TXS_SCANNED]
-
-	charged_at = get_datetime(sale.charged_at).timestamp()
-	invoiced = int(sale.invoiced_native)
-
-	best = None      # a bindable candidate
-	sighted = 0      # money seen that we could not bind
-
-	for tx in txs:
-		credit = _credit_to(tx, address)
-		if credit <= 0:
+	# `FOR UPDATE`, and it is the whole defense against two workers crediting
+	# one transaction twice. The claimed set used to be read, then settled
+	# against, then written -- with nothing holding the rows in between, so a
+	# scheduler heartbeat and a cashier pressing the button could both read
+	# "unclaimed", both settle, and both book the same coins. Locking the
+	# other sales at this address until this transaction commits serialises
+	# that window. `identity_address` is indexed so the lock is on those rows
+	# rather than on the table.
+	claimed = set()
+	for row in frappe.db.sql(
+		"""SELECT tx_id, watch_scratch FROM `tabCrypto Sale`
+		   WHERE identity_address = %(address)s AND name != %(name)s
+		   FOR UPDATE""",
+		{"address": sale.identity_address, "name": sale.name},
+		as_dict=True,
+	):
+		if row.tx_id:
+			claimed.add(row.tx_id)
+		try:
+			claimed.update(json.loads(row.watch_scratch or "{}").get("settled_tx_ids") or [])
+		except (TypeError, ValueError):
 			continue
-
-		status = tx.get("status", {})
-		confirmed = bool(status.get("confirmed"))
-		block_time = status.get("block_time")
-
-		# A transaction that predates the charge cannot be payment for it.
-		# Mempool transactions carry no block_time; they are candidates
-		# because they cannot be older than the charge if we are seeing
-		# them now for the first time.
-		if confirmed and block_time and block_time < charged_at:
-			continue
-
-		tx_id = tx.get("txid", "")
-
-		if _claimed_elsewhere(tx_id, sale.name):
-			# Real money, provably not this sale's. It is not sighted
-			# either -- another sale has named it.
-			continue
-
-		# Binding on a shared address is by amount inside the lock window.
-		# That is the weakest binding this terminal offers and the sale
-		# records it as such.
-		if credit < invoiced:
-			sighted += credit
-			continue
-
-		height = status.get("block_height")
-		confs = (tip - int(height) + 1) if (confirmed and height is not None) else 0
-		candidate = {
-			"tx_id": tx_id,
-			"credit": credit,
-			"confirmed": confirmed,
-			"confs": confs,
-			"block_time": block_time,
-		}
-		if best is None or confs > best["confs"]:
-			best = candidate
-
-	return {"tip": tip, "best": best, "sighted": sighted, "source": "esplora-rest"}
+	return frozenset(identifier for identifier in claimed if identifier)
 
 
-WATCHERS = {"bitcoin": watch_bitcoin_esplora}
+def _pending_state(batch, gate):
+	"""Which in-flight state an incomplete payment is in, for the screen.
+
+	The settlement decision says pending or not; it does not distinguish
+	"seen in the mempool" from "mined, two confirmations short", and the
+	terminal has always shown that difference because a customer standing at
+	a counter can tell them apart. Derived from the observations rather than
+	stored, so nothing can disagree with what was seen.
+	"""
+	if not batch.transfers:
+		return None, ""
+	best = max(batch.transfers, key=lambda transfer: transfer.confirmations)
+	if best.confirmed:
+		return "confirming", f"mined, {best.confirmations}/{gate} confs"
+	return "detected", "seen in mempool, not yet mined"
 
 
 def poll(sale_name):
@@ -154,22 +97,52 @@ def poll(sale_name):
 		return sale.state
 
 	rail = frappe.get_doc("Crypto Rail", sale.rail_key)
-	watcher = WATCHERS.get(rail.family)
-	if watcher is None:
+	extras = sale.extras()
+
+	# The intent is rebuilt from what charge() wrote, never re-derived. A
+	# fresh baseline would be a different chain position, and money that
+	# arrived in between would silently change which side of the line it
+	# fell on.
+	try:
+		adapter = catalog.plugin_for(rail)
+		intent = catalog.intent_from_record(extras.get("intent"))
+	except Exception as exception:
+		intent = None
+		adapter_error = str(exception)
+	else:
+		adapter_error = ""
+
+	if intent is None:
+		# A sale charged before this rail had an adapter, or by a version
+		# that wrote no intent. It cannot be advanced, and saying so is
+		# better than guessing: the money, if any, is real.
 		sale.transition_to(
-			"failed",
+			"needs_review",
 			source="poll",
-			detail=f"no watcher implements family {rail.family}",
+			detail=f"no payment intent on this sale: {adapter_error or 'not recorded at charge time'}",
 			end_kind="unverified",
+			review_reason=(
+				"This sale carries no payment intent, so the terminal cannot "
+				"ask the chain about it. Any money at the address must be "
+				"reconciled by hand."
+			),
 		)
 		sale.save(ignore_permissions=True)
 		return sale.state
 
 	lock_expired = now_datetime() > get_datetime(sale.rate_lock_end)
+	configuration = {"endpoint": extras.get("endpoint") or ""}
+	source = adapter.key
 
 	try:
-		observation = watcher(sale, rail)
-	except ChainUnreachable as unreachable:
+		batch = adapter.observe(intent, configuration)
+		while not batch.complete:
+			# A bounded read answers through a tip it names, not necessarily
+			# the chain tip. Settlement requires observations through the
+			# provider tip, so the pages are walked until they meet it.
+			batch = batch.extend(adapter.observe(intent, configuration, previous=batch))
+		decision = adapter.settle(intent, batch, _claimed_transaction_ids(sale))
+	except Exception as unreachable:
 		# The look failed. If the lock still has time, this is just a missed
 		# heartbeat and the sale stays where it is. If it does not, the sale
 		# ends -- and it ends saying the terminal could not check, because
@@ -178,7 +151,7 @@ def poll(sale_name):
 		if lock_expired:
 			sale.transition_to(
 				"needs_review",
-				source="esplora-rest",
+				source=source,
 				detail=f"final look did not reach the chain: {unreachable}",
 				end_kind="unverified",
 				review_reason=(
@@ -187,7 +160,7 @@ def poll(sale_name):
 				),
 			)
 		else:
-			sale._append_event(sale.state, sale.state, "esplora-rest", f"unreachable: {unreachable}")
+			sale._append_event(sale.state, sale.state, source, f"unreachable: {unreachable}")
 		sale.save(ignore_permissions=True)
 		return sale.state
 
@@ -196,68 +169,92 @@ def poll(sale_name):
 	if not sale.provenance:
 		sale.provenance = "REAL"
 
-	best = observation["best"]
-	sale.sighted_native = str(observation["sighted"])
+	sale.sighted_native = str(decision.sighted_native)
 	scratch = sale.scratch()
-	scratch.update({"tip": observation["tip"], "last_look": now_datetime().isoformat()})
+	scratch.update(
+		{
+			# Who answered, and when. Events record transitions; a heartbeat
+			# that reached the chain and found nothing makes no transition,
+			# and without this there would be nothing at all to distinguish
+			# "looked, saw nothing" from "never looked" -- which are the two
+			# answers this whole module exists to keep apart.
+			"provider": batch.provider,
+			"rail": batch.rail_key,
+			"tip": batch.tip,
+			"baseline_tip": batch.baseline_tip,
+			"observed_through_tip": batch.observed_through_tip,
+			"warnings": list(batch.warnings),
+			"last_look": now_datetime().isoformat(),
+		}
+	)
 	sale.set_scratch(scratch)
 
 	gate = rail.gate_for(sale.mode)
+	invoiced = int(sale.invoiced_native)
 
-	if best:
-		sale.tx_id = best["tx_id"]
-		sale.credited_native = str(best["credit"])
+	if decision.state == SETTLED:
+		# Every credited transaction is recorded, not only the first. See
+		# `_claimed_transaction_ids` for why keeping just the headline one
+		# leaves the rest looking unspent to the next sale.
+		sale.tx_id = decision.transaction_id
+		scratch["settled_tx_ids"] = list(decision.transaction_ids)
+		sale.set_scratch(scratch)
+		sale.credited_native = str(decision.credited_native)
+		if sale.state in ("awaiting", "detected", "confirming"):
+			sale.transition_to(
+				"confirmed",
+				source=source,
+				detail=decision.reason,
+				end_kind="over" if decision.credited_native > invoiced else "clean",
+				settled_at=now_datetime(),
+			)
 
-		if best["confirmed"] and best["confs"] >= gate:
-			if sale.state in ("awaiting", "detected", "confirming"):
-				sale.transition_to(
-					"confirmed",
-					source=observation["source"],
-					detail=f"{best['confs']} confs >= gate {gate}",
-					end_kind="over" if best["credit"] > int(sale.invoiced_native) else "clean",
-					settled_at=now_datetime(),
+	elif decision.state == NEEDS_REVIEW:
+		sale.credited_native = str(decision.credited_native)
+		sale.transition_to(
+			"needs_review",
+			source=source,
+			detail=decision.reason,
+			end_kind="unidentified",
+			review_reason=(
+				decision.reason
+				or (
+					f"{decision.sighted_native} arrived at this address inside the "
+					"window but could not be tied to this sale. It is real money "
+					"and it is not provably this customer's payment."
 				)
-		elif best["confirmed"]:
-			if sale.state in ("awaiting", "detected"):
+			),
+		)
+
+	else:
+		in_flight, detail = _pending_state(batch, gate)
+		if in_flight and sale.state in ("awaiting", "detected") and in_flight != sale.state:
+			sale.transition_to(in_flight, source=source, detail=detail)
+		elif detail:
+			sale._append_event(sale.state, sale.state, source, detail)
+
+		if lock_expired and sale.state in ("awaiting", "detected", "confirming"):
+			# Nothing settled, and time is up. Which ending depends entirely
+			# on whether the terminal saw money it could not name.
+			if decision.sighted_native > 0:
 				sale.transition_to(
-					"confirming",
-					source=observation["source"],
-					detail=f"mined, {best['confs']}/{gate} confs",
+					"needs_review",
+					source=source,
+					detail=f"sighted {decision.sighted_native}, none bindable",
+					end_kind="unidentified",
+					review_reason=(
+						f"{decision.sighted_native} arrived at this address inside "
+						"the window but could not be tied to this sale. It is real "
+						"money and it is not provably this customer's payment."
+					),
 				)
 			else:
-				sale._append_event(
-					sale.state, sale.state, observation["source"], f"{best['confs']}/{gate} confs"
-				)
-		else:
-			if sale.state == "awaiting":
 				sale.transition_to(
-					"detected",
-					source=observation["source"],
-					detail="seen in mempool, not yet mined",
+					"expired",
+					source=source,
+					detail="lock ran out with nothing seen",
+					end_kind="clean",
 				)
-
-	elif lock_expired:
-		# Nothing bindable, and time is up. Which ending depends entirely on
-		# whether the terminal saw money it could not name.
-		if observation["sighted"] > 0:
-			sale.transition_to(
-				"needs_review",
-				source=observation["source"],
-				detail=f"sighted {observation['sighted']} sats, none bindable",
-				end_kind="unidentified",
-				review_reason=(
-					f"{observation['sighted']} satoshi arrived at this address inside "
-					"the window but could not be tied to this sale. It is real money "
-					"and it is not provably this customer's payment."
-				),
-			)
-		else:
-			sale.transition_to(
-				"expired",
-				source=observation["source"],
-				detail="lock ran out with nothing seen",
-				end_kind="clean",
-			)
 
 	sale.save(ignore_permissions=True)
 
