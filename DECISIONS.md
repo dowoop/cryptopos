@@ -269,3 +269,25 @@ them. The builder stopped and filed the question instead of guessing, and it was
 right: reports live at `<app>/<module>/report/<name>/`, and `number_card/` and
 `dashboard_chart/` are sibling module directories holding their own records.
 Verified against the running site before the order was corrected.
+
+### D8 note · the residue was cleared, and only after it was proved to be residue
+
+D8's number cards immediately read **44 settled sales, $1,101,650 not in the
+ledger** — an alarming figure on a brand-new dashboard, and a false one. Those
+were the sales D2 already identified: created 15–17 August by the harness that
+had no cleanup.
+
+Every one of the 44 was re-checked individually before anything was removed, and
+the deletion refused any sale failing a single condition:
+
+    event-source sets : {('harness',): 44}
+    with no tx_id     : 44 / 44
+    with a book event : 0
+    refused to touch  : 0
+
+They are gone. The card now reads **0**, which is both the healthy reading and
+the true one. What remains is 16 confirmed sales, all 16 carrying an invoice,
+plus 17 expired and 14 parked for review — every one a real ending.
+
+Leaving them would have been the worse error: an oversight surface whose first
+impression is a false million-dollar hole teaches an operator to ignore it.
