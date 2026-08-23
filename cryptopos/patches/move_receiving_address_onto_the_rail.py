@@ -27,6 +27,18 @@ def execute():
 	if not frappe.db.exists("Crypto Rail", "btc"):
 		return
 
+	# And it must NOT be carried onto a rail whose adapter demands a fresh
+	# address per payment -- which `btc` is. A single address there is virgin
+	# until its first payment, so it charges perfectly, takes one payment, and
+	# refuses every sale afterwards. This patch created exactly that trap on
+	# this site before the rule existed; see DECISIONS.md D9. The address
+	# stays visible on the read-only settings field, which is where an
+	# operator can still find what they configured.
+	from cryptopos.catalog import FRESH_RECIPIENT_FAMILIES
+
+	if frappe.db.get_value("Crypto Rail", "btc", "family") in FRESH_RECIPIENT_FAMILIES:
+		return
+
 	# Only if the rail has not been given one already. A value an operator
 	# typed on the rail is newer than the one this is migrating, and a patch
 	# that overwrote it would be undoing a deliberate act.
