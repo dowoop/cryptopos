@@ -127,3 +127,45 @@ is the next piece of work on this rail, not a configuration flag.
   next sale; and it read the claimed set without holding it, so two workers
   could both settle on one transaction. The set is now read `FOR UPDATE`, and
   `identity_address` and `tx_id` are indexed so the lock is on those rows.
+
+## D6 · `tender` is not wired into this app — REJECTED, four times, 2026-08-23
+
+Four designs were proposed for making the `tender` exact-money library a real
+consumer inside cryptopos. Codex was asked to attack each cold. **All four
+lost, and every decisive claim was reproduced here before being accepted.**
+
+| proposal | what killed it |
+|---|---|
+| `to_record` emits a decimal string (Q18) | this app had already built the correct boundary; the change would make `to_record` partial where it is total |
+| `tender` as the accounting authority | dual authority — converting 17,171 sat back at an exact rate gives $10.98 against a charged $10.99, and `"exact"` raises |
+| one `tender.Asset` per Crypto Rail | three USDC rails collapse to one `Asset`; `Amount(1e6, usdc_eth) + Amount(1e6, usdc_sol)` succeeds |
+| a crypto position report | it would value a faucet token at the mainnet price |
+
+**The root cause is the same every time, and it is worth stating once.**
+`tender.Asset` is `(code, exponent)`. This application's world is
+`(chain, contract, network, mode)`. One asset code cannot carry that, and the
+gap is not cosmetic:
+
+```
+one Sepolia ETH valued at rate("3500.00", ETH, USD) -> 3500.00 USD
+```
+
+Reproduced. The terminal refuses mainnet by decision, so **every** bookable
+payment it takes is a test token — and the honest price for a test token is
+zero, which `rate()` refuses (`ValueError`). A report built this way must either
+fail or invent a positive valuation for a faucet.
+
+That is exact arithmetic over an invalid domain model, and it is *worse* than
+approximate arithmetic over a valid one, because the exactness makes the false
+number look authoritative.
+
+**What was kept.** `tender` is a correct and installable library and was proven
+so in the actual target environment: its wheel installs into the Frappe
+container's Python 3.14 and **193 of its own tests pass there against the
+installed copy with `src/` deleted**. It is simply not this application's
+library. `cryptopos_core` already owns exact integer money math for these rails,
+with every line executed and 1809/1825 mutants killed.
+
+**How to apply:** do not re-propose wiring `tender` in. If a fifth design
+appears, it must first answer how an `Asset` distinguishes Sepolia ETH from
+mainnet ETH, and what the report does with a rate of zero.
