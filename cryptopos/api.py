@@ -206,3 +206,23 @@ def rails():
 		fields=["name", "label", "asset", "chain", "family", "maturity", "maturity_note", "gate_text"],
 		order_by="label",
 	)
+
+
+@frappe.whitelist()
+def unbooked():
+	"""Money this terminal took that the ledger has not been told about.
+
+	The oversight question, asked from outside. It is read-only on purpose:
+	the retry is the scheduler's (`cryptopos.settle.sweep_unbooked`), and a
+	button that books on demand would let a surface decide something the
+	booking equation is supposed to decide.
+	"""
+	from cryptopos import settle
+
+	rows = settle.unbooked()
+	return {
+		"rows": rows,
+		"count": len(rows),
+		"bookable": sum(1 for row in rows if row["bookable"]),
+		"usd_cents": sum(row["usd_cents"] or 0 for row in rows),
+	}

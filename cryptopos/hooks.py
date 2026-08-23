@@ -299,6 +299,14 @@ scheduler_events = {
 	"cron": {
 		"* * * * *": [
 			"cryptopos.watch.heartbeat",
-		]
+		],
+		# Booking runs someone else's validation, so it can fail for reasons
+		# that have nothing to do with the sale -- and `confirmed` is a state
+		# the heartbeat does not poll, so nothing retried it. Every five
+		# minutes rather than every minute: a failed booking is waiting on a
+		# human fixing configuration, not on a block.
+		"*/5 * * * *": [
+			"cryptopos.settle.sweep_unbooked",
+		],
 	}
 }

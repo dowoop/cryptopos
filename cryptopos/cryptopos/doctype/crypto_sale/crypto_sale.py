@@ -130,11 +130,11 @@ class CryptoSale(Document):
 	# Booking. The narrowest gate in the app.
 	# ------------------------------------------------------------------
 	def may_book(self):
-		"""Return (ok, reason). The booking equation is all four terms.
+		"""Return (ok, reason). The booking equation is all five terms.
 
-		mode AND provenance AND state AND identity_source -- a sale can be
-		mainnet and REAL and SETTLED while watching a placeholder nobody
-		holds the keys to, so the destination is a term too.
+		mode AND provenance AND state AND identity_source AND tx_id -- a sale
+		can be mainnet and REAL and SETTLED while watching a placeholder
+		nobody holds the keys to, so the destination is a term too.
 		"""
 		if self.state != "confirmed":
 			return False, _("not settled (state is {0})").format(self.state)
@@ -148,6 +148,19 @@ class CryptoSale(Document):
 			return False, _("no bound money to book")
 		if self.identity_source in (None, "", "none"):
 			return False, _("nobody is known to hold the receiving address")
+		if not (self.tx_id or "").strip():
+			# The fifth term, added once the sweep made it reachable.
+			#
+			# `settle.book` writes the transaction id into the invoice's
+			# remarks so a dispute months later can walk from the ledger
+			# back to the chain, and it has a "not recorded" fallback for
+			# when there is none. That fallback is the tell: an invoice
+			# that cannot name the transaction is not evidence of anything,
+			# and the terminal has no business asserting revenue it cannot
+			# trace. Reachable in ordinary operation -- a watcher binds on
+			# `tx.get("txid", "")`, so a provider that omits the field
+			# settles a sale with an empty id.
+			return False, _("no transaction id ties this sale to the chain")
 		return True, ""
 
 	def native_shortfall(self):
