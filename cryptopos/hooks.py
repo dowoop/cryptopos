@@ -308,5 +308,11 @@ scheduler_events = {
 		"*/5 * * * *": [
 			"cryptopos.settle.sweep_unbooked",
 		],
+		# Money that arrived after the terminal stopped looking. Hourly
+		# rather than by the minute: a late payment is already late, and
+		# nothing downstream of noticing it is automatic.
+		"7 * * * *": [
+			"cryptopos.reconcile.sweep_late_payments",
+		],
 	}
 }

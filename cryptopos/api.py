@@ -290,3 +290,19 @@ def settled_not_in_ledger_usd(filters=None):
 		"route": ["List", "Crypto Sale"],
 		"route_options": {"state": "confirmed", "sales_invoice": ["is", "not set"]},
 	}
+
+
+@frappe.whitelist()
+def late_payments():
+	"""Ended sales whose receiving address took money afterwards.
+
+	The other half of the oversight question. `unbooked` asks what the ledger
+	has not been told about; this asks what the terminal itself never saw --
+	a payment confirming after its sale's lock ran out, on an address no later
+	sale watches. Read-only: honouring one is a new sale and refunding one is a
+	transfer this terminal cannot make, so both stay the operator's.
+	"""
+	from cryptopos import reconcile
+
+	rows = reconcile.late_payments()
+	return {"rows": rows, "count": len(rows)}

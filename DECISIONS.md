@@ -339,3 +339,37 @@ an invoice id and forwarding with customer- or relayer-paid gas, or a complete
 account-management system — global allocation, permanent branch monitoring,
 verified derivation metadata, signer, gas station, sweeper, dust accounting.
 Address generation alone is not the feature.
+
+## D10 · A late payment becomes a record, not a reopening — TAKEN, 2026-08-23
+
+D9 named this and left it: a payment confirming after its sale's lock ran out
+is invisible. `poll` returns immediately for a terminal state, the heartbeat
+selects only sales still in flight, and on a per-sale address nothing looks
+again. The customer paid, the sale says expired, and no surface mentions it.
+
+`cryptopos/reconcile.py` looks again, hourly, and the shape of it is the
+constraint:
+
+**Nothing reopens a sale.** `LEGAL` gives terminal states no transitions on
+purpose — a sale that has already told a customer something is not edited
+afterwards, and a correction is a new record. So the finding is an append-only
+audit row plus an operator-facing list (`api.late_payments`). Honouring a late
+payment is a new sale and refunding one is a transfer this terminal cannot
+make; both are the operator's, and neither is something a sweep should do
+quietly.
+
+**Only per-sale addresses are reconciled.** On a shared address, money arriving
+after a sale ended cannot be attributed to it — that is the whole of D5, and
+guessing here would be the same mistake arriving through a later door.
+
+**An unanswered endpoint reports zero found, not an error.** "Nobody looked"
+and "nothing was there" differ inside a sale's lifetime, which is why
+`watch.poll` is careful about it. This runs after that lifetime and will run
+again in an hour, so the distinction has stopped paying for itself.
+
+Proved against the chain rather than a mock: the harness points an ended sale
+at a real testnet4 address carrying real confirmed payments, rewinds its
+baseline below them, and the reconciler finds **3,000,000 satoshi**, records it
+without moving the sale out of its ending, and declines to record it twice.
+
+  harness: 76 checks, 0 failures, live network — was 71.

@@ -19,6 +19,7 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 from cryptopos import api as api_module
 from cryptopos import catalog as catalog_module
 from cryptopos import charge as charge_module
+from cryptopos import reconcile as reconcile_module
 from cryptopos import settle as settle_module
 from cryptopos import watch as watch_module
 from cryptopos.cryptopos.doctype.crypto_sale.crypto_sale import IllegalTransition
@@ -63,6 +64,12 @@ BIP84_ACCOUNT_VPUB = "vpub5YvMuJNjRSYon44z9QmCfdf8SqJRVNvz6m55Qy5iVjZQxDfUgtiQjn
 # A real testnet4 address, used only to prove the refusal below. Nothing is
 # ever charged to it.
 WATCHED_ADDRESS_BTC = "tb1quyndcxh5sfqv6rm73h47p9vgenlhphq28dc9ga"
+
+# A block holding one of that address's confirmed payments. STALENESS HEDGE:
+# true when last checked, 2026-08-23. If testnet4 resets, the reconciler check
+# stops finding money; read a current height off the endpoint rather than
+# loosening the assertion.
+WATCHED_PAYMENT_HEIGHT = 149613
 
 HARNESS_ACCOUNT_VPUB = "vpub5Z7wNKS2FP2pFiomoXojA6b3wxqq4ubAT3mdSYumHhqvFRB2BuZQHRrCn7FXmtR38pozTcnigp1qxRfKs44SFFv767WBjGDKaLZJGgbzyxs"
 
@@ -744,6 +751,64 @@ def _run_checks():
 		nonderiving_refusal or "not refused",
 	)
 	nonderiving.reload()
+
+	# ---------------------------------------------------------------
+	#     Money that arrived after the terminal stopped looking.
+	# ---------------------------------------------------------------
+	# A payment confirming after its sale's lock ran out is invisible: `poll`
+	# returns immediately for a terminal state, the heartbeat selects only
+	# in-flight sales, and on a per-sale address nothing looks again. Named in
+	# D9 as a consequence of D7 and closed here.
+	#
+	# Testing it needs money that really arrived, and nothing here can send
+	# any. So the fixture points an ended sale at a REAL testnet4 address with
+	# real confirmed payments, and rewinds its baseline below them -- the
+	# observation the reconciler performs is genuine even though the arrival
+	# was not late in wall-clock terms.
+	late = _charge(5000, "btc")
+	extras = late.extras()
+	extras["intent"]["recipient"] = WATCHED_ADDRESS_BTC
+	extras["intent"]["baseline"]["recipient"] = WATCHED_ADDRESS_BTC
+	extras["intent"]["baseline"]["tip"] = WATCHED_PAYMENT_HEIGHT - 1
+	late.db_set("identity_extras", json.dumps(extras), update_modified=False)
+	late.db_set("identity_address", WATCHED_ADDRESS_BTC, update_modified=False)
+	late.db_set("rate_lock_end", add_to_date(now_datetime(), seconds=-1), update_modified=False)
+	late.reload()
+	watch_module.poll(late.name)
+	late.reload()
+	check(
+		"the fixture sale ended without crediting anything",
+		late.state in ("expired", "needs_review") and int(late.credited_native or 0) == 0,
+		f"state={late.state} credited={late.credited_native}",
+	)
+
+	swept_late = reconcile_module.sweep_late_payments()
+	late.reload()
+	check(
+		"the reconciler finds money that arrived at an ended sale's address",
+		any(row["sale"] == late.name for row in swept_late["found"]),
+		str(swept_late),
+	)
+	check(
+		"it records the finding on the sale rather than reopening it",
+		late.state in ("expired", "needs_review")
+		and any(
+			event.source == "reconcile" and "late payment" in (event.detail or "")
+			for event in late.events
+		),
+		f"state={late.state} events={[(e.source, e.detail) for e in late.events]}",
+	)
+	check(
+		"an operator can see it",
+		any(row["sale"] == late.name for row in api_module.late_payments()["rows"]),
+	)
+	check(
+		"and a second sweep does not record it twice",
+		not any(
+			row["sale"] == late.name
+			for row in reconcile_module.sweep_late_payments()["found"]
+		),
+	)
 
 	check(
 		"the booking sweep is paused while the harness fabricates settlements",
