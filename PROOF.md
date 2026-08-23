@@ -183,6 +183,27 @@ Dash, Zcash and Monero encode their network and the mismatch is refused with
 words that name it. EVM and Solana do not, and this module says so instead of
 implying a check it did not perform (`EvmAddresses`, `Unverifiable`).
 
+## `hd.py` — fresh receiving addresses from a watch-only extended public key
+
+The module has no private-key derivation and no signing surface. Its expected
+keys and addresses are copied from BIP-32 and BIP-84; the test implementation
+does not manufacture the values used to judge the production implementation.
+
+| symbol | what it is for | proved by |
+|---|---|---|
+| `InvalidExtendedKey` | one documented money-boundary refusal for malformed keys, private versions, hardened paths, and impossible public children | `test_hd.ParseRefusals`, `DerivationRefusals` |
+| `ExtendedKey` | the immutable 78-byte BIP-32 public payload after Base58Check decoding | `test_hd.PublishedBip32Vectors`, `PublishedBip84Vectors` |
+| `_b58_decode` | decode the outer extended-key alphabet while refusing non-base58 text | `test_hd.ParseRefusals` |
+| `_point_from_public_key` | decompress a SEC1 key only when its x-coordinate yields a real secp256k1 point | BIP-32 vectors and `ParseRefusals`' published invalid keys |
+| `_point_add`, `_point_multiply`, `_public_key_from_point` | the secp256k1 group operations CKDpub needs, including identity, inverse, and point-at-infinity handling | BIP-32 vectors, `InternalBoundaries`, `DerivationRefusals` |
+| `_hash160` | BIP-32 parent fingerprints and BIP-84 witness programs | BIP-32 and BIP-84 published vectors |
+| `_hmac_sha512` | RFC 2104 HMAC-SHA512 for the BIP-32 chain-code step, implemented with the allowlisted standard-library hash primitive | BIP-32 published vectors |
+| `parse_extended_key` | checksum and parse xpub/tpub/zpub/vpub; refuse private versions by their bytes before interpreting key material | `test_hd.ParseRefusals`, published BIP-32 invalid vectors |
+| `derive_child` | BIP-32 CKDpub for one non-hardened index, raising on the two specified astronomically rare invalid results | BIP-32 vectors 1–3 public spans and `DerivationRefusals` |
+| `derive_path` | compose CKDpub over a relative decimal path and refuse master or hardened notation | BIP-32/BIP-84 vectors and `DerivationRefusals` |
+| `_bech32_polymod`, `_bech32_hrp_expand`, `_convert_bits`, `_bech32_encode` | encode a bounded lowercase Bech32/Bech32m string and refuse invalid HRP/data shapes | published BIP-173/BIP-350 valid and invalid vectors, `InternalBoundaries` |
+| `p2wpkh_address` | turn HASH160(compressed public key) into a BIP-84 witness-v0 address for the requested HRP | BIP-84's first two receiving addresses and existing-decoder round trips |
+
 ## `chain.py` — the policy tier, read without an account and without a fee
 
 Total by contract: **a sale must never fail because the policy layer is
