@@ -22,6 +22,7 @@ from cryptopos import charge as charge_module
 from cryptopos import settle as settle_module
 from cryptopos import watch as watch_module
 from cryptopos.cryptopos.doctype.crypto_sale.crypto_sale import IllegalTransition
+from cryptopos.cryptopos.report.crypto_takings import crypto_takings as takings_report
 from cryptopos_core import hd
 
 # The rail this harness charges on. Ethereum Sepolia, because it is one of
@@ -221,6 +222,35 @@ _BORROWED_SETTINGS = (
 _BORROWED_RAIL_FIELDS = ("testnet_recipient", "testnet_xpub", "next_address_index")
 
 
+# The scheduler runs `settle.sweep_unbooked` every five minutes, and this
+# harness deliberately creates sales that satisfy all five booking terms with a
+# FABRICATED transaction id. Those two facts must never be true at the same
+# moment: a sweep firing mid-run would book fiction into the ledger, and if a
+# run then died before `_cleanup` the invoice would simply stay there. Borrowed
+# and given back exactly like the settings, for the same reason.
+_SWEEP_JOB = "cryptopos.settle.sweep_unbooked"
+
+
+def _pause_sweep():
+	"""Stop the booking sweep for the duration of the run. Returns what to restore."""
+	name = frappe.db.get_value("Scheduled Job Type", {"method": _SWEEP_JOB}, "name")
+	if not name:
+		return None
+	was_stopped = frappe.db.get_value("Scheduled Job Type", name, "stopped")
+	frappe.db.set_value("Scheduled Job Type", name, "stopped", 1, update_modified=False)
+	frappe.db.commit()
+	return (name, was_stopped)
+
+
+def _resume_sweep(borrowed):
+	if not borrowed:
+		return
+	name, was_stopped = borrowed
+	if frappe.db.exists("Scheduled Job Type", name):
+		frappe.db.set_value("Scheduled Job Type", name, "stopped", was_stopped, update_modified=False)
+		frappe.db.commit()
+
+
 def _snapshot_settings():
 	settings = frappe.get_single("CryptoPoS Settings")
 	borrowed = {field: settings.get(field) for field in _BORROWED_SETTINGS}
@@ -251,11 +281,13 @@ def run():
 	is exactly when the terminal must not be left pointed somewhere else.
 	"""
 	borrowed = _snapshot_settings()
+	sweep = _pause_sweep()
 	try:
 		return _run_checks()
 	finally:
 		_cleanup()
 		_restore_settings(borrowed)
+		_resume_sweep(sweep)
 
 
 def _run_checks():
@@ -629,12 +661,170 @@ def _run_checks():
 		str({name: row["binding"] for name, row in offered.items()}),
 	)
 	check(
+		"the booking sweep is paused while the harness fabricates settlements",
+		bool(frappe.db.get_value("Scheduled Job Type", {"method": _SWEEP_JOB}, "stopped")),
+		str(frappe.db.get_value("Scheduled Job Type", {"method": _SWEEP_JOB}, "stopped")),
+	)
+	check(
 		"a deriving rail reports its unused-address run and the limit",
 		all(
 			isinstance(row["gap_run"], int) and row["gap_limit"] == catalog_module.GAP_LIMIT
 			for row in offered.values()
 		),
 		str({name: (row["gap_run"], row["gap_limit"]) for name, row in offered.items()}),
+	)
+
+	# ---------------------------------------------------------------
+	# 11. Rail health is a deliberate network operation.
+	# ---------------------------------------------------------------
+	# The terminal calls api.rails() on every page load. Guard the default
+	# path with a replacement that fails if readiness -- one network call per
+	# rail -- is touched at all.
+	real_readiness_for = catalog_module.readiness_for
+
+	def unexpected_readiness(*_args, **_kwargs):
+		raise AssertionError("default api.rails() asked the network for readiness")
+
+	catalog_module.readiness_for = unexpected_readiness
+	default_rails = None
+	default_error = ""
+	try:
+		default_rails = api_module.rails()
+	except Exception as exception:
+		default_error = str(exception)
+	finally:
+		catalog_module.readiness_for = real_readiness_for
+	check(
+		"api rails makes no readiness call by default",
+		default_rails is not None and not default_error,
+		default_error,
+	)
+	check(
+		"default rail rows omit readiness",
+		default_rails is not None and all("readiness" not in row for row in default_rails),
+		str(default_rails),
+	)
+
+	readiness_rows = api_module.rails(with_readiness=1)
+	check(
+		"readiness is returned for every enabled rail when asked",
+		len(readiness_rows) == frappe.db.count("Crypto Rail", {"enabled": 1})
+		and all(
+			row.get("readiness", {}).get("rail_key")
+			and isinstance(row["readiness"].get("ready"), list)
+			for row in readiness_rows
+		),
+		str(readiness_rows),
+	)
+
+	# ---------------------------------------------------------------
+	# 12. Takings stay per rail, and booking's gap stays visible.
+	# ---------------------------------------------------------------
+	report_date = get_datetime(now_datetime()).date()
+	report_filters = {"from_date": report_date, "to_date": report_date}
+	columns, before_rows, _message, before_chart = takings_report.execute(report_filters)
+	column_names = [column["fieldname"] for column in columns]
+	check(
+		"the takings report returns exactly its seven columns and rows",
+		column_names
+		== [
+			"date",
+			"rail",
+			"sales",
+			"booked_usd",
+			"unbooked_usd",
+			"credited_native",
+			"unit",
+		]
+		and isinstance(before_rows, list),
+		str(column_names),
+	)
+
+	def report_row(rows, rail_key):
+		return next(
+			(
+				row
+				for row in rows
+				if get_datetime(row["date"]).date() == report_date and row["rail"] == rail_key
+			),
+			{
+				"booked_usd": 0,
+				"unbooked_usd": 0,
+				"credited_native": "0",
+			},
+		)
+
+	before_eth = report_row(before_rows, RAIL)
+	report_booked = _charge(1234)
+	_settle_by_hand(report_booked, int(report_booked.invoiced_native))
+	settle_module.book(report_booked)
+	report_booked.reload()
+	_, booked_rows, _message, booked_chart = takings_report.execute(report_filters)
+	booked_eth = report_row(booked_rows, RAIL)
+	check(
+		"a booked settled sale increases booked USD only",
+		round((booked_eth["booked_usd"] - before_eth["booked_usd"]) * 100) == 1234
+		and booked_eth["unbooked_usd"] == before_eth["unbooked_usd"],
+		f"before={before_eth} after={booked_eth}",
+	)
+	check(
+		"the booked chart increases from booked USD only",
+		round(
+			(booked_chart["data"]["datasets"][0]["values"][0]
+			- before_chart["data"]["datasets"][0]["values"][0])
+			* 100
+		)
+		== 1234,
+		f"before={before_chart} after={booked_chart}",
+	)
+
+	report_unbooked = _charge(2345)
+	_settle_by_hand(report_unbooked, int(report_unbooked.invoiced_native))
+	_, unbooked_rows, _message, unbooked_chart = takings_report.execute(report_filters)
+	unbooked_eth = report_row(unbooked_rows, RAIL)
+	check(
+		"an unbooked settled sale increases unbooked USD only",
+		round((unbooked_eth["unbooked_usd"] - booked_eth["unbooked_usd"]) * 100) == 2345
+		and unbooked_eth["booked_usd"] == booked_eth["booked_usd"],
+		f"before={booked_eth} after={unbooked_eth}",
+	)
+	check(
+		"unbooked USD never enters the booked chart",
+		unbooked_chart == booked_chart,
+		f"before={booked_chart} after={unbooked_chart}",
+	)
+
+	report_btc = _charge(3456, "btc")
+	_settle_by_hand(report_btc, int(report_btc.invoiced_native))
+	_, final_rows, _message, _chart = takings_report.execute(report_filters)
+	today_rows = [row for row in final_rows if get_datetime(row["date"]).date() == report_date]
+	check(
+		"credited native is text in every report row",
+		all(isinstance(row["credited_native"], str) for row in final_rows),
+		str(final_rows),
+	)
+	check(
+		"report rows never combine rails",
+		len({(str(row["date"]), row["rail"]) for row in final_rows}) == len(final_rows)
+		and {RAIL, "btc"} <= {row["rail"] for row in today_rows},
+		str(today_rows),
+	)
+
+	unbooked_summary = api_module.unbooked()
+	count_card = api_module.settled_not_in_ledger_count(filters=[])
+	value_card = api_module.settled_not_in_ledger_usd(filters=[])
+	check(
+		"the settled-not-in-ledger count card matches the oversight endpoint",
+		count_card["value"] == unbooked_summary["count"]
+		and count_card["fieldtype"] == "Int",
+		f"card={count_card} endpoint={unbooked_summary}",
+	)
+	check(
+		"the settled-not-in-ledger value card uses charged USD cents",
+		round(value_card["value"] * 100) == unbooked_summary["usd_cents"]
+		and value_card["fieldtype"] == "Currency"
+		and value_card["currency"] == "USD",
+		f"card={value_card} endpoint={unbooked_summary}",
 	)
 
 	frappe.db.commit()

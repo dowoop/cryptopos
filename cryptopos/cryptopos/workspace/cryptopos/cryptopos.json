@@ -1,7 +1,12 @@
 {
  "app": "cryptopos",
- "charts": [],
- "content": "[{\"id\":\"cpos_head\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Take a payment</b></span>\",\"col\":12}},{\"id\":\"cpos_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Terminal\",\"col\":3}},{\"id\":\"cpos_sc2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales\",\"col\":3}},{\"id\":\"cpos_sc3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Rails\",\"col\":3}},{\"id\":\"cpos_sc4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Settings\",\"col\":3}},{\"id\":\"cpos_head2\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Records</b></span>\",\"col\":12}},{\"id\":\"cpos_card1\",\"type\":\"card\",\"data\":{\"card_name\":\"Point of Sale\",\"col\":4}}]",
+ "charts": [
+  {
+   "chart_name": "Booked Takings — Last 30 Days",
+   "label": "Booked Takings — Last 30 Days"
+  }
+ ],
+ "content": "[{\"id\":\"cpos_head\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Take a payment</b></span>\",\"col\":12}},{\"id\":\"cpos_sc1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Terminal\",\"col\":3}},{\"id\":\"cpos_sc2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales\",\"col\":3}},{\"id\":\"cpos_sc3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Rails\",\"col\":3}},{\"id\":\"cpos_sc4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Settings\",\"col\":3}},{\"id\":\"cpos_head_money\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Money oversight</b></span>\",\"col\":12}},{\"id\":\"cpos_unbooked_count\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Settled, not yet in the ledger — count\",\"col\":3}},{\"id\":\"cpos_unbooked_value\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Settled, not yet in the ledger — USD\",\"col\":3}},{\"id\":\"cpos_takings_chart\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Booked Takings — Last 30 Days\",\"col\":6}},{\"id\":\"cpos_head2\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Records</b></span>\",\"col\":12}},{\"id\":\"cpos_card1\",\"type\":\"card\",\"data\":{\"card_name\":\"Point of Sale\",\"col\":4}}]",
  "creation": "2026-08-15 12:00:00.000000",
  "docstatus": 0,
  "doctype": "Workspace",
@@ -52,13 +57,34 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "dependencies": "Crypto Sale",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Crypto Takings",
+   "link_count": 0,
+   "link_to": "Crypto Takings",
+   "link_type": "Report",
+   "onboard": 0,
+   "report_ref_doctype": "Crypto Sale",
+   "type": "Link"
   }
  ],
  "modified": "2026-08-16 21:00:00.000000",
  "modified_by": "Administrator",
  "module": "CryptoPoS",
  "name": "CryptoPoS",
- "number_cards": [],
+ "number_cards": [
+  {
+   "label": "Settled, not yet in the ledger — count",
+   "number_card_name": "Settled Not In Ledger Count"
+  },
+  {
+   "label": "Settled, not yet in the ledger — USD",
+   "number_card_name": "Settled Not In Ledger Value"
+  }
+ ],
  "owner": "Administrator",
  "parent_page": "",
  "public": 1,

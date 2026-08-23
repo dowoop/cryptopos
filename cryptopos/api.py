@@ -198,7 +198,7 @@ def loyalty_status(sale_name=None, account=""):
 
 
 @frappe.whitelist()
-def rails():
+def rails(with_readiness=0):
 	"""Enabled rails, with the maturity note the operator is owed.
 
 	`gap_run` is the count of consecutive most-recent endings on the rail that
@@ -211,6 +211,8 @@ def rails():
 	"""
 	from cryptopos import catalog
 
+	with_readiness = bool(int(with_readiness or 0))
+	mode = frappe.get_single("CryptoPoS Settings").mode if with_readiness else None
 	rows = frappe.get_all(
 		"Crypto Rail",
 		filters={"enabled": 1},
@@ -230,8 +232,20 @@ def rails():
 	for row in rows:
 		derives = bool((row.pop("testnet_xpub", "") or "").strip())
 		row["binding"] = "per-sale" if derives else "shared"
-		row["gap_run"] = catalog.gap_run_for(frappe.get_doc("Crypto Rail", row["name"])) if derives else 0
+		rail = frappe.get_doc("Crypto Rail", row["name"])
+		row["gap_run"] = catalog.gap_run_for(rail) if derives else 0
 		row["gap_limit"] = catalog.GAP_LIMIT
+		if with_readiness:
+			readiness = catalog.readiness_for(rail, mode)
+			row["readiness"] = {
+				"rail_key": readiness.rail_key,
+				"ready": sorted(readiness.ready),
+				"unavailable": [
+					{"capability": capability, "reason": reason}
+					for capability, reason in readiness.unavailable
+				],
+				"chargeable": readiness.chargeable,
+			}
 	return rows
 
 
@@ -252,4 +266,27 @@ def unbooked():
 		"count": len(rows),
 		"bookable": sum(1 for row in rows if row["bookable"]),
 		"usd_cents": sum(row["usd_cents"] or 0 for row in rows),
+	}
+
+
+@frappe.whitelist()
+def settled_not_in_ledger_count(filters=None):
+	"""Number-card value: settled sales still absent from the ledger."""
+	return {
+		"value": unbooked()["count"],
+		"fieldtype": "Int",
+		"route": ["List", "Crypto Sale"],
+		"route_options": {"state": "confirmed", "sales_invoice": ["is", "not set"]},
+	}
+
+
+@frappe.whitelist()
+def settled_not_in_ledger_usd(filters=None):
+	"""Number-card value: charged USD still absent from the ledger."""
+	return {
+		"value": unbooked()["usd_cents"] / 100.0,
+		"fieldtype": "Currency",
+		"currency": "USD",
+		"route": ["List", "Crypto Sale"],
+		"route_options": {"state": "confirmed", "sales_invoice": ["is", "not set"]},
 	}

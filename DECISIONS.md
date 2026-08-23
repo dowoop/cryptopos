@@ -221,3 +221,51 @@ from the decimals in force when it was written. A disagreement there is
 reported as drift, not silently repaired.
 
   harness: 55 checks, 0 failures, live network — was 44.
+
+## D8 · The takings an operator can see, and the ones they cannot — TAKEN, 2026-08-23
+
+Everything the terminal knew about its own money was reachable only by reading
+`Crypto Sale` rows one at a time. `api.unbooked` answered the most important
+question and answered it to a JSON caller, not to the person at the desk.
+
+There is now a `Crypto Takings` script report (one row per rail per day), two
+number cards, and a 30-day chart on the workspace. Three rules shaped every one
+of them, and each was already paid for:
+
+- **No native amount is ever converted to a currency.** D6, four times over: an
+  asset code carries no network, this terminal refuses mainnet, so every payment
+  it can book is a test token and a valuation column would be a
+  false-but-authoritative number.
+- **`credited_native` is text and never crosses rails.** Wei plus satoshi is a
+  number that means nothing, and an 18-decimal daily total exceeds 2^53 in a
+  desk that renders through JavaScript. D4.
+- **Booked and unbooked USD are separate columns, never one total.** The gap
+  between them is the number D1 exists to keep visible.
+
+The number cards are labelled *"Settled, not yet in the ledger"* rather than
+"unbooked", because a category name does not tell an operator that a non-zero
+value is a problem.
+
+**Rail health is asked for, never polled.** `readiness` makes a network call per
+rail and `api.rails()` runs on every terminal page load, so it is behind
+`with_readiness=0`. A till that hangs at the counter because a public RPC is
+slow is worse than one that does not show rail health.
+
+**And one hazard the harness introduced, closed.** `_settle_by_hand` fabricates
+a sale satisfying all five booking terms with an invented transaction id —
+which is what lets the booking half be tested at all, since nothing here can
+make a payment. But the scheduler sweeps every five minutes, so a run overlapping
+a sweep would book fiction, and a run that died before `_cleanup` would leave the
+invoice behind. The harness now stops that scheduled job for the duration and
+gives it back, exactly as it borrows the operator's settings, and asserts that
+it is stopped while it runs.
+
+  harness: 68 checks, 0 failures, live network — was 55.
+
+**The correction worth recording.** This order's first `OWNS` list put the
+report at `cryptopos/report/`, which Frappe never syncs, and asked for number
+cards and charts to be defined inside the workspace file, which cannot define
+them. The builder stopped and filed the question instead of guessing, and it was
+right: reports live at `<app>/<module>/report/<name>/`, and `number_card/` and
+`dashboard_chart/` are sibling module directories holding their own records.
+Verified against the running site before the order was corrected.
