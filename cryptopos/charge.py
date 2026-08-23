@@ -94,6 +94,11 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 	# once already by editing four version bytes.
 	address = catalog.recipient_for(rail, mode)
 	identity_source = "config" if address else "none"
+	binding = (
+		"per-sale"
+		if mode == "testnet" and (getattr(rail, "testnet_xpub", "") or "").strip()
+		else "shared" if identity_source == "config" else ""
+	)
 
 	if identity_source == "none":
 		frappe.throw(
@@ -178,7 +183,7 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 			"rate_lock_end": add_to_date(charged_at, seconds=RATE_LOCK_SECONDS),
 			"identity_address": address,
 			"identity_source": identity_source,
-			"binding": "shared" if identity_source == "config" else "",
+			"binding": binding,
 			# The intent, written once and never again, exactly like every
 			# other snapshot on this record. The watcher rebuilds it from
 			# here rather than re-deriving it, because a baseline re-read on

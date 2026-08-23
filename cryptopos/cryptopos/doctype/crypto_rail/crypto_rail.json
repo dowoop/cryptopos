@@ -30,6 +30,8 @@
   "testnet_url",
   "testnet_transport",
   "testnet_name",
+  "testnet_xpub",
+  "next_address_index",
   "testnet_recipient",
   "column_break_endpoints",
   "live_url",
@@ -169,6 +171,20 @@
    "label": "Testnet Name"
   },
   {
+   "description": "Watch-only account key for testnet. For BIP-84 this is m/84'/1'/0'; the terminal derives external addresses 0/i.",
+   "fieldname": "testnet_xpub",
+   "fieldtype": "Data",
+   "label": "Testnet Xpub"
+  },
+  {
+   "default": "0",
+   "description": "The next external-chain address index. Allocated by the terminal under a row lock; operators do not edit it.",
+   "fieldname": "next_address_index",
+   "fieldtype": "Int",
+   "label": "Next Address Index",
+   "read_only": 1
+  },
+  {
    "fieldname": "column_break_endpoints",
    "fieldtype": "Column Break"
   },
@@ -197,7 +213,7 @@
    "label": "Catalog Key"
   },
   {
-   "description": "Where money on this rail is received on testnet. One address per rail: an address is a fact about a chain, not about the terminal.",
+   "description": "Shared testnet receiving address. Leave empty when Testnet Xpub supplies a fresh address per sale.",
    "fieldname": "testnet_recipient",
    "fieldtype": "Data",
    "label": "Testnet Recipient"

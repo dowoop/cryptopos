@@ -32,21 +32,17 @@ from cryptopos_core import rails as _rails
 # answered `eth_chainId` and could not serve the log reads the watcher needs.
 # So these are the ones proven to work, not the first ones found.
 #
-# **`btc` is seeded switched off, and that is a finding rather than an
-# oversight.** Its adapter refuses `capture_baseline` on an address that has
-# any transaction history, because a single paginated read of a reused
-# address cannot tell old money from this sale's. That refusal is right: a
-# payment broadcast for an earlier, expired sale and confirmed during this
-# one's window is credited to this one, and the customer standing at the
-# counter walks away without paying. The terminal has no per-sale address
-# source yet, so the rail is described and not offered. See DECISIONS.md.
+# `btc` is back on because the terminal now derives a fresh address for each
+# sale from an operator's watch-only account key. A deployment with neither an
+# xpub nor a recipient can display the offered rail, but charge still refuses
+# before showing a payment request. See DECISIONS.md D5.
 ADAPTERS = {
 	"btc": (
 		"bitcoin:testnet4/native:btc",
 		"https://mempool.space/testnet4/api",
 		"esplora-rest",
 		"testnet4",
-		0,
+		1,
 	),
 	"eth": (
 		"ethereum:sepolia/native:eth",
@@ -95,8 +91,24 @@ def rail_rows():
 				"testnet_gate_confs": rail.get("testnet_gate_confs") or 0,
 				"gate_text": rail["gate_text"],
 				"binding_text": rail["binding"],
-				"maturity": rail["maturity"],
-				"maturity_note": rail["maturity_note"],
+				# Maturity as THIS terminal can stand behind it, not as the
+				# table describes the rail's potential.
+				#
+				# `cryptopos_core.rails` defines "works" as real testnet reads
+				# AND a real payer, and its notes were carried over verbatim
+				# from the tkinter terminal, which bundled a wallet that signed
+				# and broadcast. This app does not: it is watch-only by charter
+				# and there is no signing path anywhere in it. Seeding its notes
+				# unchanged put "real payer (bundled wallet signs & broadcasts)"
+				# on an operator's screen for three rails that have no payer at
+				# all, which is precisely the overclaim the maturity field
+				# exists to prevent.
+				"maturity": "partial",
+				"maturity_note": (
+					f"real {network} reads through {transport}; this terminal is "
+					f"watch-only, so the customer's own wallet is the payer. "
+					f"Binding: {rail['binding']}."
+				),
 				"testnet_url": endpoint,
 				"testnet_transport": transport,
 				"testnet_name": network,
@@ -124,27 +136,57 @@ def rail_rows():
 # workspace on the site rather than this app's.
 
 
-def seed_rails():
-	"""Create any rail that is missing, and teach existing ones their adapter.
+# Prose about the chain, refreshed on every migrate. These describe what a rail
+# IS; the operator owns none of them, and a stale one is an untrue sentence on
+# an operator's screen. `btc`'s note read "no HD derivation yet, so binding is
+# by amount rather than per-sale" for eight days after the terminal started
+# deriving a fresh address per sale.
+_DESCRIPTIONS = (
+	"label",
+	"chain",
+	"gate_text",
+	"binding_text",
+	"maturity",
+	"maturity_note",
+	"real_transport",
+)
 
-	Idempotent, and deliberately conservative on rails that already exist: a
-	row an operator has edited keeps its endpoint and its enabled flag. Only
-	`catalog_key` is filled in, because a rail with no adapter cannot be
-	charged at all and leaving it blank would be leaving it broken.
+# Facts the arithmetic depends on. NEVER rewritten under an existing rail: a
+# sale's `credited_native` is an integer whose meaning comes from the decimals
+# in force when it was written, and changing them reinterprets money that has
+# already been taken. A disagreement here is reported, not repaired.
+_ARITHMETIC = ("asset", "family", "unit_name", "native_decimals", "display_decimals")
+
+
+def seed_rails():
+	"""Create any rail that is missing; refresh what an existing one only says.
+
+	Idempotent, and deliberately conservative about anything an operator owns:
+	`enabled`, the endpoint, the receiving material and the address index are
+	never touched on a rail that already exists.
 	"""
-	created = adopted = 0
+	created = adopted = refreshed = 0
+	drifted = []
 	for row in rail_rows():
-		if frappe.db.exists("Crypto Rail", row["rail_key"]):
-			existing = frappe.get_doc("Crypto Rail", row["rail_key"])
-			if not (existing.catalog_key or "").strip():
-				existing.db_set("catalog_key", row["catalog_key"], update_modified=False)
-				adopted += 1
+		if not frappe.db.exists("Crypto Rail", row["rail_key"]):
+			doc = frappe.new_doc("Crypto Rail")
+			doc.update(row)
+			doc.insert(ignore_permissions=True)
+			created += 1
 			continue
-		doc = frappe.new_doc("Crypto Rail")
-		doc.update(row)
-		doc.insert(ignore_permissions=True)
-		created += 1
-	return {"created": created, "adopted": adopted}
+
+		existing = frappe.get_doc("Crypto Rail", row["rail_key"])
+		if not (existing.catalog_key or "").strip():
+			existing.db_set("catalog_key", row["catalog_key"], update_modified=False)
+			adopted += 1
+		for field in _DESCRIPTIONS:
+			if (existing.get(field) or "") != (row[field] or ""):
+				existing.db_set(field, row[field], update_modified=False)
+				refreshed += 1
+		for field in _ARITHMETIC:
+			if existing.get(field) != row[field]:
+				drifted.append(f"{row['rail_key']}.{field}: {existing.get(field)!r} != {row[field]!r}")
+	return {"created": created, "adopted": adopted, "refreshed": refreshed, "drifted": drifted}
 
 
 def after_install():

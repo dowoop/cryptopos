@@ -199,13 +199,40 @@ def loyalty_status(sale_name=None, account=""):
 
 @frappe.whitelist()
 def rails():
-	"""Enabled rails, with the maturity note the operator is owed."""
-	return frappe.get_all(
+	"""Enabled rails, with the maturity note the operator is owed.
+
+	`gap_run` is the count of consecutive most-recent endings on the rail that
+	credited nothing. It matters only on a rail deriving a fresh address per
+	sale: each unpaid sale leaves an unused address behind, and a wallet
+	restored from the account key stops scanning after `catalog.GAP_LIMIT` of
+	them, so money paid past that run is money the operator's own wallet will
+	not find. It is a warning and never a gate -- refusing a customer over a
+	wallet-scanning convention would be the terminal overreaching.
+	"""
+	from cryptopos import catalog
+
+	rows = frappe.get_all(
 		"Crypto Rail",
 		filters={"enabled": 1},
-		fields=["name", "label", "asset", "chain", "family", "maturity", "maturity_note", "gate_text"],
+		fields=[
+			"name",
+			"label",
+			"asset",
+			"chain",
+			"family",
+			"maturity",
+			"maturity_note",
+			"gate_text",
+			"testnet_xpub",
+		],
 		order_by="label",
 	)
+	for row in rows:
+		derives = bool((row.pop("testnet_xpub", "") or "").strip())
+		row["binding"] = "per-sale" if derives else "shared"
+		row["gap_run"] = catalog.gap_run_for(frappe.get_doc("Crypto Rail", row["name"])) if derives else 0
+		row["gap_limit"] = catalog.GAP_LIMIT
+	return rows
 
 
 @frappe.whitelist()

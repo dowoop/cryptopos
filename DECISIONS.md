@@ -169,3 +169,55 @@ with every line executed and 1809/1825 mutants killed.
 **How to apply:** do not re-propose wiring `tender` in. If a fifth design
 appears, it must first answer how an `Asset` distinguishes Sepolia ETH from
 mainnet ETH, and what the report does with a rate of zero.
+
+## D7 · Every Bitcoin sale gets its own address — TAKEN, 2026-08-23
+
+D5 switched `btc` off for want of a per-sale address source.
+`cryptopos_core.hd` supplies it — BIP-32 CKDpub from a watch-only account key,
+BIP-84 P2WPKH, published-vector tested — and this is the wiring. `btc` is on
+again, and its binding is now `per-sale` rather than `shared`.
+
+**Public keys only, and the module cannot be talked out of it.**
+`parse_extended_key` refuses `xprv`/`tprv` by version bytes before it looks at
+any key material. The rail's field refuses a mainnet `xpub`/`zpub`, refuses a
+key that is not account-level, and refuses a rail configured with *both* an
+xpub and a fixed recipient — those are two different bindings and a rail must
+say which it means.
+
+**The index is allocated under a row lock on the rail.** `poll` and `charge`
+are both reachable from the scheduler and from a whitelisted endpoint, and two
+workers reading the same index would hand two customers the same address —
+which is the defect this whole line of work removes. A sequential test passes
+either way, so the lock is written deliberately and commented as such.
+
+**The gap limit is surfaced, never enforced.** Every derived address is shown
+to a customer and not every one is paid, so unpaid sales leave unused addresses
+behind; a wallet restored from the account key stops scanning after 20 of them.
+`api.rails()` reports `gap_run` and `gap_limit` per rail. It does not refuse a
+charge — declining a customer's money over a wallet-scanning convention would
+be the terminal overreaching.
+
+**Two things the harness had to be taught, and both were findings.**
+
+- **A published test vector cannot prove freshness.** BIP-84's account key is
+  one of the most widely known in existence and its addresses carry real
+  testnet history, so the adapter refused them. The harness now uses two keys
+  for two jobs: the published one proves the *derivation* against numbers a BIP
+  published, and a minted, never-used account key proves the terminal hands out
+  a *fresh* address. Nothing is ever expected to arrive at the second.
+- **The seeded maturity notes described a different application.**
+  `cryptopos_core.rails` defines "works" as real testnet reads **and a real
+  payer**, and its notes came over verbatim from the tkinter terminal, which
+  bundled a wallet that signed and broadcast. This app has no signing path
+  anywhere. Three rails were telling an operator "real payer (bundled wallet
+  signs & broadcasts)". They now say what is true here: real reads on the named
+  network, watch-only, the customer's own wallet is the payer, and the binding
+  named — including "weakest" where that is what it is.
+
+`seed_rails` refreshes rail *prose* on every migrate for that reason, and
+deliberately never rewrites `asset`, `family`, `unit_name` or either decimals
+field on an existing rail: a `credited_native` is an integer whose meaning comes
+from the decimals in force when it was written. A disagreement there is
+reported as drift, not silently repaired.
+
+  harness: 55 checks, 0 failures, live network — was 44.

@@ -24,6 +24,7 @@ import frappe
 from frappe import _
 
 from cryptopos_core import catalog as _core
+from cryptopos_core import hd
 from cryptopos_core.errors import CryptoPosError
 from cryptopos_core.plugin import (
 	ADDRESS_VALIDATION,
@@ -98,11 +99,93 @@ def recipient_for(rail, mode):
 	version bytes. An empty answer is a refusal, not a default.
 	"""
 	if mode == "testnet":
+		xpub = (getattr(rail, "testnet_xpub", "") or "").strip()
+		if xpub:
+			# This row lock is what serialises address allocation. A scheduler
+			# worker and a cashier request cannot both read the same next index:
+			# the second SELECT waits until the first transaction has advanced it.
+			rows = frappe.db.sql(
+				"""SELECT testnet_xpub, next_address_index
+				   FROM `tabCrypto Rail`
+				   WHERE name = %(name)s
+				   FOR UPDATE""",
+				{"name": rail.name},
+				as_dict=True,
+			)
+			if not rows:
+				frappe.throw(
+					_("Rail {0} no longer exists, so it cannot allocate an address.").format(
+						rail.name
+					),
+					title=_("Receiving material disappeared"),
+				)
+			locked = rows[0]
+			locked_xpub = (locked.testnet_xpub or "").strip()
+			if not locked_xpub:
+				frappe.throw(
+					_("Rail {0} no longer has a testnet extended public key.").format(rail.name),
+					title=_("Receiving material disappeared"),
+				)
+			index = int(locked.next_address_index or 0)
+			try:
+				account = hd.parse_extended_key(locked_xpub)
+				child = hd.derive_path(account, f"0/{index}")
+				address = hd.p2wpkh_address(child, "tb")
+			except hd.InvalidExtendedKey as exception:
+				frappe.throw(str(exception), title=_("Receiving key refused"))
+			frappe.db.set_value(
+				"Crypto Rail",
+				rail.name,
+				"next_address_index",
+				index + 1,
+				update_modified=False,
+			)
+			rail.next_address_index = index + 1
+			return address
 		return (rail.testnet_recipient or "").strip()
 	# Mainnet is refused before this is reached, and demo has no recipient by
 	# design: a demo that quietly borrowed the real address would be a demo
 	# that can take money.
 	return ""
+
+
+# BIP-44's gap limit: a wallet restored from the account key stops scanning
+# after this many consecutive unused addresses, so money paid beyond the run is
+# money the operator's own wallet will not find.
+GAP_LIMIT = 20
+
+# How far back the run is counted. The answer saturates here, and saturating is
+# harmless: anything at or above `GAP_LIMIT` is already the loudest the warning
+# gets, and counting an unbounded history to say so would read every sale the
+# rail has ever had in order to report a number that cannot change the advice.
+GAP_SCAN_LIMIT = 100
+
+
+def gap_run_for(rail):
+	"""Consecutive latest endings on this rail with no credited money.
+
+	This is a warning counter, never a charge gate. BIP-44's gap limit tells
+	the operator when a restored wallet may stop scanning; it does not give
+	the terminal authority to refuse a customer.
+
+	Bounded at `GAP_SCAN_LIMIT` -- see the constant for why the saturation
+	costs nothing.
+	"""
+	run = 0
+	for credited_native in frappe.get_all(
+		"Crypto Sale",
+		filters={
+			"rail_key": rail.name,
+			"state": ("in", ("confirmed", "expired", "failed", "needs_review")),
+		},
+		order_by="creation desc, name desc",
+		pluck="credited_native",
+		limit=GAP_SCAN_LIMIT,
+	):
+		if int(credited_native or 0) > 0:
+			break
+		run += 1
+	return run
 
 
 def readiness_for(rail, mode):

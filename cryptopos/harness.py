@@ -17,10 +17,12 @@ import frappe
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from cryptopos import api as api_module
+from cryptopos import catalog as catalog_module
 from cryptopos import charge as charge_module
 from cryptopos import settle as settle_module
 from cryptopos import watch as watch_module
 from cryptopos.cryptopos.doctype.crypto_sale.crypto_sale import IllegalTransition
+from cryptopos_core import hd
 
 # The rail this harness charges on. Ethereum Sepolia, because it is one of
 # the rails this terminal actually offers -- `btc` is seeded switched off,
@@ -32,6 +34,39 @@ RAIL = "eth"
 # watch-only and so is this harness, which is also why no section asserts
 # that a payment arrived. Nobody sends one.
 WATCHED_ADDRESS = "0x25C5f1f6EFf347D0E0c49021B157759331325019"
+
+# BIP-84's published account zpub and first two external receiving keys:
+# https://github.com/bitcoin/bips/blob/master/bip-0084.mediawiki#test-vectors
+BIP84_ACCOUNT_ZPUB = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs"
+
+# `testnet_xpub` deliberately refuses that zpub's mainnet version bytes. This
+# vpub is the same published 78-byte account-key payload with only its SLIP-132
+# version changed from zpub to vpub and its Base58Check checksum recomputed.
+# No child key was generated to make the expected answers agree with the code.
+BIP84_ACCOUNT_VPUB = "vpub5YvMuJNjRSYon44z9QmCfdf8SqJRVNvz6m55Qy5iVjZQxDfUgtiQjnc7CC1fAbED2tAGCZRERUfvtn2DstZGU6HMns6dXXH2wujSc2wfi2x"
+
+# An account key whose addresses have never been used.
+#
+# The published vector above cannot do this job: it is one of the most widely
+# known keys in existence, its addresses carry real testnet history, and the
+# bitcoin adapter refuses a recipient with any -- which is the whole point of
+# DECISIONS.md D5. So the two keys do two different jobs. The published one
+# proves the DERIVATION is right, against numbers a BIP published. This one
+# proves the terminal hands out a FRESH address, which needs addresses nobody
+# has touched. Its 0/0 and 0/1 were confirmed to have zero chain and mempool
+# transactions on 2026-08-23.
+#
+# Nothing is ever expected to arrive at these addresses: every sale the harness
+# charges on this rail is left to expire. Who could hold the corresponding
+# private key is therefore not a property this fixture needs.
+HARNESS_ACCOUNT_VPUB = "vpub5Z7wNKS2FP2pFiomoXojA6b3wxqq4ubAT3mdSYumHhqvFRB2BuZQHRrCn7FXmtR38pozTcnigp1qxRfKs44SFFv767WBjGDKaLZJGgbzyxs"
+
+# The BIP publishes these two witness programs as bc1 addresses. These fixed
+# tb1 encodings change only the human-readable part and checksum for testnet.
+BIP84_TESTNET_RECEIVING = (
+	"tb1qcr8te4kr609gcawutmrza0j4xv80jy8zmfp6l0",
+	"tb1qnjg0jd8228aq7egyzacy8cys3knf9xvrn9d67m",
+)
 
 # A transaction id shaped like the chain's own, for the sections that need a
 # settled sale in order to test BOOKING rather than observation. It is
@@ -56,6 +91,15 @@ def _refuses(action):
 	except Exception:
 		return True
 	return False
+
+
+def _refusal_message(action):
+	"""The precise words from a refusal, or empty text if it did not refuse."""
+	try:
+		action()
+	except Exception as exception:
+		return str(exception)
+	return ""
 
 
 def _ensure_prerequisites():
@@ -174,7 +218,7 @@ _BORROWED_SETTINGS = (
 	"company",
 )
 
-_BORROWED_RAIL_FIELDS = ("testnet_recipient",)
+_BORROWED_RAIL_FIELDS = ("testnet_recipient", "testnet_xpub", "next_address_index")
 
 
 def _snapshot_settings():
@@ -235,6 +279,7 @@ def _run_checks():
 	check("the rate carries the time it was read", bool(sale.rate_at))
 	check("the URI encodes the address", WATCHED_ADDRESS in (sale.uri or ""), sale.uri)
 	check("identity source is recorded", sale.identity_source == "config", sale.identity_source)
+	check("a configured recipient records the shared binding", sale.binding == "shared", sale.binding)
 	check("an unsettled sale has booked nothing", not sale.sales_invoice)
 
 	bookable, reason = sale.may_book()
@@ -465,23 +510,106 @@ def _run_checks():
 	)
 
 	# ---------------------------------------------------------------
-	# 9. A rail that cannot bind safely is described and not offered.
+	# 9. Bitcoin allocates one published-vector address per sale.
 	# ---------------------------------------------------------------
-	# `btc` is seeded switched off because its adapter refuses a receiving
-	# address that has any history, and this terminal has no per-sale
-	# address source. Asserted rather than assumed: a later change that
-	# quietly switched it back on would take money it cannot attribute.
-	# DECISIONS.md D5 has the seven sequences that settled this.
+	btc = frappe.get_doc("Crypto Rail", "btc")
+	btc.testnet_recipient = ""
+	btc.testnet_xpub = BIP84_ACCOUNT_ZPUB
+	mainnet_refusal = _refusal_message(lambda: btc.save(ignore_permissions=True))
 	check(
-		"btc is present, and is not on offer",
-		frappe.db.exists("Crypto Rail", "btc")
-		and not frappe.db.get_value("Crypto Rail", "btc", "enabled"),
-		f"enabled={frappe.db.get_value('Crypto Rail', 'btc', 'enabled')!r}",
+		"a mainnet account xpub is refused by the testnet field",
+		bool(mainnet_refusal) and "mainnet" in mainnet_refusal.lower(),
+		mainnet_refusal or "not refused",
+	)
+
+	btc.reload()
+	btc.testnet_xpub = BIP84_ACCOUNT_VPUB
+	btc.testnet_recipient = BIP84_TESTNET_RECEIVING[0]
+	both_refusal = _refusal_message(lambda: btc.save(ignore_permissions=True))
+	check(
+		"a rail refuses both per-sale and shared receiving material",
+		bool(both_refusal) and "one or the other" in both_refusal.lower(),
+		both_refusal or "not refused",
+	)
+
+	btc.reload()
+	btc.testnet_recipient = ""
+	btc.testnet_xpub = HARNESS_ACCOUNT_VPUB
+	btc.next_address_index = 0
+	btc.save(ignore_permissions=True)
+	frappe.db.commit()
+
+	# Derivation is checked against what a BIP published, with no network and
+	# no sale involved. This is the half the published key is right for; the
+	# half below needs addresses nobody has ever used, which that key by its
+	# nature cannot provide.
+	published = hd.parse_extended_key(BIP84_ACCOUNT_VPUB)
+	derived = tuple(
+		hd.p2wpkh_address(hd.derive_path(published, f"0/{index}"), "tb") for index in (0, 1)
 	)
 	check(
-		"charging a rail that is off is refused",
-		_refuses(lambda: charge_module.charge(5000, "btc")),
+		"derivation reproduces BIP-84's published receiving keys",
+		derived == BIP84_TESTNET_RECEIVING,
+		str(derived),
 	)
+
+	expected = tuple(
+		hd.p2wpkh_address(hd.derive_path(hd.parse_extended_key(HARNESS_ACCOUNT_VPUB), f"0/{i}"), "tb")
+		for i in (0, 1)
+	)
+	used_before = set(
+		frappe.get_all(
+			"Crypto Sale",
+			filters={"identity_address": ("in", list(expected))},
+			pluck="identity_address",
+		)
+	)
+	btc_first = _charge(5000, "btc")
+	btc_second = _charge(7000, "btc")
+	addresses = (btc_first.identity_address, btc_second.identity_address)
+	check("two btc charges receive two different addresses", len(set(addresses)) == 2, str(addresses))
+	check(
+		"they are the next two addresses under the account key",
+		addresses == expected,
+		f"{addresses} vs {expected}",
+	)
+	check(
+		"neither allocated address belonged to an earlier sale",
+		not used_before,
+		str(sorted(used_before)),
+	)
+	check(
+		"the btc address index advances exactly twice",
+		int(frappe.db.get_value("Crypto Rail", "btc", "next_address_index") or 0) == 2,
+		str(frappe.db.get_value("Crypto Rail", "btc", "next_address_index")),
+	)
+	check(
+		"a derived address records the per-sale binding",
+		btc_first.binding == btc_second.binding == "per-sale",
+		f"{btc_first.binding!r}, {btc_second.binding!r}",
+	)
+
+	# End both unpaid sales so the latest terminal run is exactly two. This
+	# number is a warning for the operator, never a refusal in charge().
+	for btc_sale in (btc_first, btc_second):
+		btc_sale.db_set("rate_lock_end", add_to_date(now_datetime(), seconds=-1), update_modified=False)
+		watch_module.poll(btc_sale.name)
+		btc_sale.reload()
+	check(
+		"two latest unpaid btc endings make a gap run of two",
+		catalog_module.gap_run_for(btc) == 2,
+		str(catalog_module.gap_run_for(btc)),
+	)
+	btc_row = next((row for row in api_module.rails() if row["name"] == "btc"), {})
+	check(
+		"api rails reports the btc gap run",
+		btc_row.get("gap_run") == 2,
+		str(btc_row),
+	)
+
+	# ---------------------------------------------------------------
+	# 10. Offered rails name the adapter that drives them.
+	# ---------------------------------------------------------------
 	check(
 		"the rails an operator is offered are the ones that work",
 		all(
@@ -489,6 +617,24 @@ def _run_checks():
 			for row in api_module.rails()
 		),
 		str([row["name"] for row in api_module.rails()]),
+	)
+	# The gap limit is a ceiling, and a ceiling ships on the surface that
+	# offers the feature. A rail deriving a fresh address per sale leaves an
+	# unused address behind every time a sale goes unpaid, and a wallet
+	# restored from the account key stops scanning after 20 of them.
+	offered = {row["name"]: row for row in api_module.rails()}
+	check(
+		"every offered rail says which binding it uses",
+		all(row["binding"] in ("per-sale", "shared") for row in offered.values()),
+		str({name: row["binding"] for name, row in offered.items()}),
+	)
+	check(
+		"a deriving rail reports its unused-address run and the limit",
+		all(
+			isinstance(row["gap_run"], int) and row["gap_limit"] == catalog_module.GAP_LIMIT
+			for row in offered.values()
+		),
+		str({name: (row["gap_run"], row["gap_limit"]) for name, row in offered.items()}),
 	)
 
 	frappe.db.commit()

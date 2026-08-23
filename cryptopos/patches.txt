@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 cryptopos.patches.move_receiving_address_onto_the_rail
 cryptopos.patches.seed_the_charge_ready_rails
+cryptopos.patches.derive_receiving_addresses
