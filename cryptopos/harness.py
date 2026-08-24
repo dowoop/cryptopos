@@ -87,10 +87,19 @@ WATCHED_ADDRESS_BTC = "tb1quyndcxh5sfqv6rm73h47p9vgenlhphq28dc9ga"
 # always going to drift -- and the hedge above only guarded the direction that
 # did not happen.
 #
-# Confirmed NOT caused by any local change: the same four fail against
-# `watch.py` as it stood before the `_why` diagnostics commit. Fixing it means
-# a fixture that does not depend on that address's current balance, which is a
-# larger change than this note.
+# FIXED the same day, and the diagnosis was sharper than the paragraph above.
+# The fixture did not merely depend on the address's balance -- it depended on
+# every payment above the pinned height having been CLAIMED by an earlier
+# harness sale. Verified in the data: 30 sales have pointed at this address and
+# claimed 16 tx_ids, in pairs, one settling "over" and the next finding nothing.
+# Thirteen unclaimed payments accumulated between runs and the second sale of
+# the pair settled instead of ending unpaid.
+#
+# The fixture below is now two phases: the baseline is the LIVE tip while the
+# sale must end unpaid, and is rewound to this height only afterwards, which is
+# what makes the money late. Neither phase depends on what has accumulated.
+# This constant is therefore only used by phase 2, where "a payment exists at
+# or above it" is all that is required of it.
 WATCHED_PAYMENT_HEIGHT = 149613
 
 
