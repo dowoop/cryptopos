@@ -405,7 +405,17 @@ after expiry is `late`, never `timely`. Measured against
 | chance an immediately-broadcast payment misses the lock | **~25%** |
 
 Testnet4 keeps the 20-minute difficulty-reset rule, so ~20 minutes is where its
-intervals *sit*, not an outlier. **Re-run it rather than believing this table:**
+intervals *sit*, not an outlier.
+
+**This was not a discovery, and saying so matters.** The sibling repository's
+faucet registry has said it since **2026-07-23**, a month earlier, in the `btc`
+entry's own words: *"testnet4 blocks are ~10 min, so expect the rate lock to run
+out."* The `dash` entry quantified the same shape on 2026-07-26 — *"settling
+takes ~14 min against a 20 min lock."* Two rails, written down, twice. What is
+new here is the measurement (20.0 min median, ~25% stranded, re-runnable) and
+the finding that it is **not recoverable** — D12, D13 and D14 close every route
+to crediting the tail automatically. A known cost turned out to be a structural
+limit. **Re-run it rather than believing this table:**
 `make lockcheck` (`tools/lockcheck.py`) is that measurement, and it exits
 non-zero while the share is above 5%. The lock is systematically shorter than the
 chain it is used on. And D10's reconciler deliberately never reopens a sale, so
