@@ -24,6 +24,25 @@ from cryptopos import catalog
 from cryptopos_core.plugin import NEEDS_REVIEW, SETTLED
 
 
+def _why(exception):
+	"""An exception as text that says something, even when it carries no message.
+
+	Fourteen sales on this instance recorded their failure as `"final look did
+	not reach the chain: "` -- with nothing after the colon, because
+	`str(exception)` is empty for any exception raised without arguments, and
+	`ChainUnreachable`, `TimeoutError` and `OSError` are all commonly raised
+	that way. A rate limit, a DNS failure and a read timeout were therefore
+	indistinguishable in the only place that remembered them, and the root
+	cause of the only failure mode this terminal has ever shown could not be
+	recovered afterwards.
+
+	The class name is always available and is never empty, so it leads.
+	"""
+	text = str(exception).strip()
+	name = type(exception).__name__
+	return f"{name}: {text}" if text else name
+
+
 class ChainUnreachable(Exception):
 	"""The question could not be asked. Not the same as a negative answer.
 
@@ -108,7 +127,7 @@ def poll(sale_name):
 		intent = catalog.intent_from_record(extras.get("intent"))
 	except Exception as exception:
 		intent = None
-		adapter_error = str(exception)
+		adapter_error = _why(exception)
 	else:
 		adapter_error = ""
 
@@ -152,7 +171,7 @@ def poll(sale_name):
 			sale.transition_to(
 				"needs_review",
 				source=source,
-				detail=f"final look did not reach the chain: {unreachable}",
+				detail=f"final look did not reach the chain: {_why(unreachable)}",
 				end_kind="unverified",
 				review_reason=(
 					"The rate lock ran out and the last look never reached the "
@@ -160,7 +179,7 @@ def poll(sale_name):
 				),
 			)
 		else:
-			sale._append_event(sale.state, sale.state, source, f"unreachable: {unreachable}")
+			sale._append_event(sale.state, sale.state, source, f"unreachable: {_why(unreachable)}")
 		sale.save(ignore_permissions=True)
 		return sale.state
 
