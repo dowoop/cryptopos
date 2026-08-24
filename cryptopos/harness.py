@@ -69,6 +69,27 @@ WATCHED_ADDRESS_BTC = "tb1quyndcxh5sfqv6rm73h47p9vgenlhphq28dc9ga"
 # true when last checked, 2026-08-23. If testnet4 resets, the reconciler check
 # stops finding money; read a current height off the endpoint rather than
 # loosening the assertion.
+#
+# THE HEDGE ANTICIPATED THE WRONG DRIFT, AND THE OTHER ONE HAS HAPPENED.
+# Measured 2026-08-24: these four reconciler checks now FAIL, and not because
+# testnet4 reset. `tb1quyndc…` is an actively funded address -- 590
+# transactions, ~1,000,000 sat arriving repeatedly, most recently at height
+# 149693. Thirteen transactions now sit at or above the pinned height,
+# totalling 13,000,000 sat, where the fixture was written expecting the
+# arithmetic of one. The sale it charges no longer ends unpaid; it settles,
+# with "payment exceeds the invoice", so the reconciler has nothing late to
+# find and the three checks after it fall with the first.
+#
+# This is the defect class the vault names: a check must not derive its
+# expectation from the thing that can break. This one derives it from the live
+# contents of a third-party address that is still receiving money, so it was
+# always going to drift -- and the hedge above only guarded the direction that
+# did not happen.
+#
+# Confirmed NOT caused by any local change: the same four fail against
+# `watch.py` as it stood before the `_why` diagnostics commit. Fixing it means
+# a fixture that does not depend on that address's current balance, which is a
+# larger change than this note.
 WATCHED_PAYMENT_HEIGHT = 149613
 
 HARNESS_ACCOUNT_VPUB = "vpub5Z7wNKS2FP2pFiomoXojA6b3wxqq4ubAT3mdSYumHhqvFRB2BuZQHRrCn7FXmtR38pozTcnigp1qxRfKs44SFFv767WBjGDKaLZJGgbzyxs"
