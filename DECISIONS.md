@@ -814,3 +814,78 @@ not open as stated. What remains genuinely available:
 **One more, easily missed:** `usdc-pol` is an Amoy rail. A contract deployed on
 Sepolia cannot receive or identify its payments; that rail needs its own
 deployment or must be switched off.
+
+## D16 · The trilemma was wrong — three deadlines were being treated as one, 2026-08-24
+
+D11–D15 concluded that an unattended public demo is not achievable here. That
+negative conclusion was itself put under attack, and **it did not survive.**
+Recording the overturn in full, because a wrong conclusion that five rejections
+made feel proven is the most expensive kind.
+
+**The smuggled premise.** Every rejected architecture assumed the payment
+deadline, the finality deadline and the commercial quote deadline are one
+instant. They are not, and *this codebase already knows it*: `bitcoin.py` tests
+`block_time_epoch <= expires_at_epoch` (**was it committed in time**) entirely
+separately from `confirmations >= 1` (**has it matured**), and `evm.py` does the
+same. I read that split earlier and drew the wrong conclusion from it.
+
+**The host throws the distinction away.** Reproduced, `watch.py`:
+
+```python
+if lock_expired and sale.state in ("awaiting", "detected", "confirming"):
+```
+
+**`confirming` is in that list.** A sale whose payment was already included in a
+block *on time*, and which is merely waiting to mature, is made terminal at
+wall-clock expiry. And `confirming` is explicitly non-terminal in `LEGAL`. So
+there is a fourth option the trilemma missed:
+
+> **A finite window for making an attributable commitment, followed by an
+> unbounded wait for maturity — but only for sales that actually committed.**
+
+This is not D12's free option, and the difference is exact: a saved URI with no
+payment stays `awaiting` and still expires on time. The extended wait is only
+ever granted to a payer who has *already transferred the invoiced amount*. That
+is an ordinary merchant obligation, not an option. D10 is untouched — nothing
+terminal is reopened, because the sale never became terminal.
+
+**Where this actually bites, and where it does not.** Worked through here rather
+than taken from the attack:
+
+- **The EVM rails: decisive.** A Sepolia payment is included within ~12 s, so
+  the sale reaches `confirming` long before expiry and then merely waits. D15's
+  "finality is 17–19 min against a 15-minute lock" was **a category error** —
+  finality does not have to arrive inside the quote window. Expiring those sales
+  is pure, avoidable loss.
+- **Bitcoin testnet4: does not help.** At a 1-confirmation gate, `confirming`
+  barely exists — the block *is* the gate. A testnet4 payment is typically still
+  in the mempool at expiry, so the sale is `detected`, and the block that
+  eventually carries it fails the `timely` test anyway. Crediting it would need a
+  trustworthy pre-expiry commitment, and a mempool sighting is not one: RBF lets
+  it be replaced. **D11's ~25% stands for Bitcoin.** The trilemma was not wrong
+  about testnet4; it was wrong about being universal.
+
+**Two rails were dismissed without being looked at.**
+
+- `PolygonAmoyUsdcRail` is seeded, enabled, and its own docstring says *"settled
+  only once Heimdall reports the block finalized"* — it already settles on
+  finality rather than on a confirmation count.
+- `solana:devnet` and its SPL rail are in the core catalog as `RequestRail`s, and
+  the sibling repository already has a working Solana payer. What is missing is
+  an extracted observer — implementation work, not an impossibility.
+
+**What was actually proved by D11–D15**, stated correctly:
+
+> The current production-shaped USD settlement policy cannot be deployed
+> unchanged as a reliable public demo.
+
+That is true. *"The goal is not achievable"* is false, and D14's and D15's
+closing sections overreach — read them with this entry beside them.
+
+**The decision that remains is the maintainer's, and it is not an engineering one:** is
+this a demonstration of the technical workflow, or a production-equivalent
+commercial promise? The negative result depended entirely on assuming the
+latter — the same 15-minute economic quote, the same real USD invoice, the same
+mutable ERPNext settings, the same refusal of an online authorisation key. None
+of that is in the goal. **If it is a demonstration, the unattended goal is
+achievable**, and the first step is small: stop expiring `confirming` sales.
