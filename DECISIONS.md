@@ -619,3 +619,82 @@ buy its comfort with somebody's money.
 **Unchanged and still required before anything is public:** ownership in the
 API (D11), admission quotas and poll throttles (D11, restated here), and
 per-sale addresses or disabled rails on every rail that is enabled (D5, D9).
+
+## D14 · Booking a late payment as a new sale — REJECTED, 2026-08-24
+
+The one direction D13 left standing was attacked and lost. Four architectures in
+one day, all trying to move the same boundary, all failing.
+
+**A payment proves receipt. It does not prove agreement.** A per-sale address
+shows that money reached an address allocated for the *old* intent. It does not
+establish a new order, an accepted price, a delivered item, a customer, a tax
+treatment, or which company earned the revenue — and `settle.book` asserts all
+of those, from current settings, when it runs. So there are only two readings
+and both refuse the design:
+
+- If the payment satisfies the *original* purchase, it must carry the original
+  item, customer, company and consideration. Repricing it and calling it a new
+  document is an accounting correction of the old transaction — **a reopening in
+  substance**, whatever the document identity says.
+- If it does not, the merchant has received unapplied money. That is a deposit
+  or a refundable receipt requiring a human decision — **which is exactly what
+  D10 already does.**
+
+**"Terms at confirmation" are not available.** The system is not running when a
+retired address confirms, and there is no historical-price query —
+`quote_detailed` fetches spot and stamps it `now()`. There is no immutable
+history of the settings either. A transaction confirming at 09:59, an operator
+changing company and item at 10:00, and an hourly sweep at 10:07 give the 10:07
+terms. And a one-confirmation gate has no stable confirmation time at all: a
+reorg can move the same txid into a later block at a different price, where
+deduplicating by txid keeps the wrong price and reprocessing books twice.
+
+**The option survives, it only changes shape.** A retired address becomes a
+permanent bearer capability. Save addresses while loyalty is off; broadcast to
+all of them when a high earn-rate promotion starts. Or wait until quotas, store
+hours or inventory controls would refuse a new sale, and pay a retired address
+instead — the automatic reconciler bypasses the admission path entirely.
+
+**And the perpetual obligation does not go away, it relocates.** Reproduced:
+`reconcile.py` bounds itself deliberately — `WINDOW_HOURS = 48`,
+`sweep_late_payments(limit=25)`, `order_by="modified desc"`. More than 25
+expiries an hour and older candidates are displaced by newer ones until they
+leave the 48-hour window unchecked, forever. Remove the bound and every address
+ever issued becomes a permanent automated commercial obligation. D11's
+starvation path moved from `heartbeat` to `reconcile`; it did not close.
+
+Six further implementation defects were named and the structural ones
+reproduced: `look_again` returns only a **sum**, discarding txids, per-transfer
+amounts and confirmation times; it counts unconfirmed transfers, so an RBF
+payment could book an invoice and then be replaced; deduplication is one boolean
+per old sale rather than per transaction, so one dust payment marks an address
+done forever; and `tx_id` is indexed but not unique, so two sweep workers can
+create two invoices for one transaction.
+
+---
+
+### What four rejections in one day actually establish
+
+**D10's boundary was already in the right place.** A late payment is recorded
+and handed to a human. Every attempt to automate past that — a longer window
+(D12), a fixed quote (D13), a new document (D14) — failed, and each failed
+because it needed the chain to supply a fact the chain does not have.
+
+**So the goal has to change its promise, not its implementation.** "Any stranger
+completes a sale end to end, unattended, reliably" is not available on
+`bitcoin:testnet4` at a 15-minute lock: `make lockcheck` measures the loss at
+~25% and D12–D14 close every route to recovering it automatically. The honest
+options, none yet taken:
+
+1. **Say the number on the screen.** Keep everything as it is and tell the
+   visitor, before they pay, that a testnet4 block may not arrive in time and
+   roughly how often that happens. A demo that is honest about a 20-minute chain
+   is a better demonstration of this terminal than one that hides it.
+2. **Demonstrate on a fast chain and fix attribution instead.** Sepolia's median
+   interval measured **12.0 s**, and 0% of payments miss the lock. Its defect is
+   D5's shared address, not timing — a different, and bounded, problem.
+3. **Keep a human in the loop**, and make the late-payment queue a visible part
+   of the demo rather than a failure of it.
+
+Only the second is a route to an unattended demo, and it requires answering D5
+and D9 on the EVM rails rather than avoiding them by choosing Bitcoin.
