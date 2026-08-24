@@ -11,9 +11,12 @@ receipt reprinted next month has to say what the customer was handed.
 import json
 import secrets
 
+from zoneinfo import ZoneInfo
+
 import frappe
 from frappe import _
 from frappe.utils import add_to_date, now_datetime
+from frappe.utils import get_system_timezone
 
 from cryptopos import catalog, rates
 from cryptopos_core import qr
@@ -22,6 +25,31 @@ from cryptopos_core.errors import CryptoPosError
 from cryptopos_core.plugin import PaymentIntent
 
 RATE_LOCK_SECONDS = 15 * 60
+
+
+def _epoch(moment):
+	"""A Frappe datetime as a real Unix epoch.
+
+	`now_datetime()` returns a NAIVE datetime in the SITE's timezone, and
+	`datetime.timestamp()` reads a naive value as the PROCESS's local time. Those
+	agree only when the site timezone and the container timezone happen to
+	match, and here they do not: the site is `America/Adak` and the container
+	has no TZ set, so it is UTC.
+
+	The result was a flat nine-hour error, and it was invisible for the worst
+	possible reason. `expires_at_epoch` landed nine hours in the PAST, and both
+	the Bitcoin and EVM adapters credit a transfer only when
+	`block_time_epoch <= expires_at_epoch` -- so a payment made *now* was always
+	"after expiry" and no live sale could ever settle, while the harness's
+	fixtures, which point at payments that are genuinely days old, settled
+	perfectly. Fifty sales were taken here without one genuine end-to-end
+	settlement, and the suites stayed green throughout.
+
+	Measured 2026-08-24 by charging a sale, paying it from the bundled wallet
+	within seconds, watching the transaction reach eleven confirmations on
+	Sepolia, and watching the terminal call it "payment arrived after expiry".
+	"""
+	return int(moment.replace(tzinfo=ZoneInfo(get_system_timezone())).timestamp())
 
 # Deliberately excludes vowels and the characters that a handwritten or
 # read-aloud reference confuses: 0/O, 1/I/L, 5/S, 8/B.
@@ -149,8 +177,8 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 			rail_key=adapter.key,
 			recipient=address,
 			amount_native=invoiced_native,
-			created_at_epoch=int(charged_at.timestamp()),
-			expires_at_epoch=int(charged_at.timestamp()) + RATE_LOCK_SECONDS,
+			created_at_epoch=_epoch(charged_at),
+			expires_at_epoch=_epoch(charged_at) + RATE_LOCK_SECONDS,
 			payment_reference=invoice_ref,
 			baseline=baseline,
 		)
