@@ -874,6 +874,51 @@ than taken from the attack:
   the sibling repository already has a working Solana payer. What is missing is
   an extracted observer — implementation work, not an impossibility.
 
+---
+
+### Measured on this instance: the dominant failure is not the one I was chasing
+
+D16's claim was checked against the live database rather than argued. **No sale
+here has ever entered `confirming`** — all 50 went `awaiting -> confirmed`
+directly, because Bitcoin's gate is one confirmation and the block *is* the
+gate. So the `confirming` expiry defect is **latent**: real in code, never fired
+here. Said plainly, because "found in the code" and "cost us something" are
+different claims.
+
+What *has* fired is worse, and I was not looking at it:
+
+| outcome | count | of 50 |
+|---|---|---|
+| `confirmed` — settled and booked | 16 | 32% |
+| `expired`, `end_kind=clean` — nobody paid | 19 | 38% |
+| **`needs_review`, `end_kind=unverified`** | **15** | **30%** |
+
+**Fourteen of those fifteen carry one reason, verbatim:**
+
+> *"The rate lock ran out and the last look never reached the chain, so the
+> terminal cannot say whether this was paid."*
+
+All fourteen on `btc`. Those sales were not lost to a slow block. They were lost
+because **the terminal could not reach mempool.space at the moment the clock ran
+out**, and a sale that cannot be looked at is being given a terminal state
+anyway. That is D11's finding 4 — which I recorded as "accepted on mechanism,
+not reproduced end to end" — **already reproduced, fourteen times, in this
+instance's own data.**
+
+`look_again`'s docstring says it deliberately treats "nobody looked" and
+"nothing was there" as the same, and is explicitly right to: *"the distinction
+matters inside a sale's lifetime, and this is after it."* At expiry the sale is
+still inside its lifetime, and there the distinction is exactly what is being
+thrown away.
+
+**So the single highest-value change in this whole register is small:** a sale
+must not be given a terminal state on a clock when the terminal has no evidence
+either way. Retry, or hold it non-terminal, but do not write down "cannot say
+whether this was paid" as an ending. It is the same error as expiring a
+`confirming` sale — a terminal state assigned from the clock rather than from
+what was observed — and unlike that one, it has already cost 28% of every sale
+this instance has taken.
+
 **What was actually proved by D11–D15**, stated correctly:
 
 > The current production-shaped USD settlement policy cannot be deployed
