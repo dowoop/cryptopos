@@ -20,7 +20,7 @@ RUFF     := uvx ruff@$(RUFF_VER)
 MATRIX   := 3.9 3.11 3.13 3.14
 
 .DEFAULT_GOAL := help
-.PHONY: help dev test terminal prove worth watch lint fmt matrix wheel check build dist-verify clean docker-check
+.PHONY: lockcheck help dev test terminal prove worth watch lint fmt matrix wheel check build dist-verify clean docker-check
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -148,3 +148,8 @@ clean: ## Remove build output, caches and the dev venv
 	rm -rf $(VENV) $(BUILDENVS) $(CORE)/dist
 	find . -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 	find . -name .ruff_cache -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
+# The measurement behind D11, re-runnable. Not in `make prove`: it needs the
+# network, and a public endpoint being slow is not a defect in this repository.
+lockcheck:
+	python3 tools/lockcheck.py
