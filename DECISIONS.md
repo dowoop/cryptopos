@@ -1276,6 +1276,26 @@ two simultaneously-pollable sales reaches a transaction first is decided by an
 unspecified database ordering. Attribution held in both trials; nothing in the
 code guarantees it will.
 
+**And the review flood is not a defect in the state machine — do not "fix" it
+there.** The branch is deliberate:
+
+```python
+if claimed and sum(t.amount_native for t in claimed) + sighted >= intent.amount_native:
+    return SettlementDecision(NEEDS_REVIEW, ..., reason="... already claimed by another intent")
+```
+
+It fires when the transactions *claimed by other intents* would have covered
+this invoice — that is, when there was enough money at this address to pay this
+sale and something else took it. On a shared address, where the binding is
+"static address + exact-amount match (weakest)", **that claim might be wrong,
+and a human should look.** On a per-sale address it should be unreachable, and
+if it ever fires there it is a genuine anomaly.
+
+So the state machine is being honest about the weakness of the binding beneath
+it. Expiring those sales cleanly would suppress exactly the signal that exists
+because the binding is weak — the same shape of mistake D17 caught. **Fix the
+binding and the flood disappears on its own.**
+
 **What this changes.** D5's conclusion stands — a shared address cannot be made
 safe — but the argument for fixing it is now the *demo experience*, not the
 ledger. The answer is still D20's binding, and the reason to want it is that
