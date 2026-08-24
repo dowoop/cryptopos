@@ -405,7 +405,9 @@ after expiry is `late`, never `timely`. Measured against
 | chance an immediately-broadcast payment misses the lock | **~25%** |
 
 Testnet4 keeps the 20-minute difficulty-reset rule, so ~20 minutes is where its
-intervals *sit*, not an outlier. The lock is systematically shorter than the
+intervals *sit*, not an outlier. **Re-run it rather than believing this table:**
+`make lockcheck` (`tools/lockcheck.py`) is that measurement, and it exits
+non-zero while the share is above 5%. The lock is systematically shorter than the
 chain it is used on. And D10's reconciler deliberately never reopens a sale, so
 those sales never settle and never book — they become an audit row. **About one
 honest, immediately-paid sale in four fails permanently, with a perfect payer.**
