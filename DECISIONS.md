@@ -911,13 +911,35 @@ matters inside a sale's lifetime, and this is after it."* At expiry the sale is
 still inside its lifetime, and there the distinction is exactly what is being
 thrown away.
 
-**So the single highest-value change in this whole register is small:** a sale
-must not be given a terminal state on a clock when the terminal has no evidence
-either way. Retry, or hold it non-terminal, but do not write down "cannot say
-whether this was paid" as an ending. It is the same error as expiring a
-`confirming` sale — a terminal state assigned from the clock rather than from
-what was observed — and unlike that one, it has already cost 28% of every sale
-this instance has taken.
+**Corrected the same day, before acting on it.** The paragraph that stood here
+called this "the single highest-value change" and said it "has already cost 28%
+of every sale this instance has taken". Both claims were wrong, and checking
+them before building anything is the only reason they are not now in the code.
+
+- **`watch.py` already does what I was about to propose.** Its module docstring
+  distinguishes the three answers explicitly — *"a heartbeat that fails is not a
+  heartbeat that found nothing"* — and the code already retries a failed look
+  for as long as the lock has time, ending `unverified` only when the clock is
+  genuinely out. Those fourteen sales were handled **correctly by this module's
+  own standard.** It did not lie; it declined to claim an observation it had not
+  made.
+- **The 28% is historical, from code that no longer exists.** All fourteen were
+  charged on 2026-08-15, 08-16 and 08-17 — before the catalog rework of
+  2026-08-23. Measured by day: 47 of the 50 sales predate that rework. **Since
+  it, this instance has taken three sales**, and none reached this path. Three
+  is not evidence of anything. Quoting 28% of an all-time total as though it
+  described the current system was measuring the wrong population.
+
+**What does survive, and it is smaller and real.** All fourteen recorded the
+failure as `"final look did not reach the chain: "` — **with nothing after the
+colon.** The exception stringified to empty, so the terminal has no record of
+*why* the chain was unreachable: a rate limit, a DNS failure and a timeout are
+now indistinguishable in the only place that remembers. That is the same defect
+class as tender's order 0054, and it is the reason the root cause of those
+fourteen cannot be diagnosed today.
+
+**And the `confirming` gap in point 3 above is still real** — but it is latent,
+not measured, because no sale here has ever entered that state.
 
 **What was actually proved by D11–D15**, stated correctly:
 
