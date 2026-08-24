@@ -12,6 +12,7 @@ broke rather than which line threw.
 """
 
 import json
+import urllib.request
 
 import frappe
 from frappe.utils import add_to_date, get_datetime, now_datetime
@@ -91,6 +92,21 @@ WATCHED_ADDRESS_BTC = "tb1quyndcxh5sfqv6rm73h47p9vgenlhphq28dc9ga"
 # a fixture that does not depend on that address's current balance, which is a
 # larger change than this note.
 WATCHED_PAYMENT_HEIGHT = 149613
+
+
+def _testnet4_tip():
+	"""The current testnet4 height, read rather than pinned.
+
+	The reconciler fixture below needs a baseline with NOTHING above it, and
+	the only honest way to get one at a live address is to ask where the chain
+	is now. Pinning a height cannot do it: the address keeps receiving.
+	"""
+	request = urllib.request.Request(
+		"https://mempool.space/testnet4/api/blocks/tip/height",
+		headers={"User-Agent": "cryptopos-harness/1.0"},
+	)
+	with urllib.request.urlopen(request, timeout=25) as response:
+		return int(response.read().decode("ascii").strip())
 
 HARNESS_ACCOUNT_VPUB = "vpub5Z7wNKS2FP2pFiomoXojA6b3wxqq4ubAT3mdSYumHhqvFRB2BuZQHRrCn7FXmtR38pozTcnigp1qxRfKs44SFFv767WBjGDKaLZJGgbzyxs"
 
@@ -786,11 +802,20 @@ def _run_checks():
 	# real confirmed payments, and rewinds its baseline below them -- the
 	# observation the reconciler performs is genuine even though the arrival
 	# was not late in wall-clock terms.
+	# TWO PHASES, and they are separated on purpose -- see the note by
+	# WATCHED_PAYMENT_HEIGHT for what happens when they are not.
+	#
+	# PHASE 1: the sale must end having credited nothing. That is only
+	# deterministic if NOTHING is above its baseline, so the baseline is the
+	# live tip. The previous version rewound below a pinned payment here and
+	# relied on every payment above it already being claimed by an earlier
+	# harness sale -- true while runs kept pace with the address, false the
+	# moment thirteen payments arrived between runs, which is what broke it.
 	late = _charge(5000, "btc")
 	extras = late.extras()
 	extras["intent"]["recipient"] = WATCHED_ADDRESS_BTC
 	extras["intent"]["baseline"]["recipient"] = WATCHED_ADDRESS_BTC
-	extras["intent"]["baseline"]["tip"] = WATCHED_PAYMENT_HEIGHT - 1
+	extras["intent"]["baseline"]["tip"] = _testnet4_tip()
 	late.db_set("identity_extras", json.dumps(extras), update_modified=False)
 	late.db_set("identity_address", WATCHED_ADDRESS_BTC, update_modified=False)
 	late.db_set("rate_lock_end", add_to_date(now_datetime(), seconds=-1), update_modified=False)
@@ -802,6 +827,14 @@ def _run_checks():
 		late.state in ("expired", "needs_review") and int(late.credited_native or 0) == 0,
 		f"state={late.state} credited={late.credited_native}",
 	)
+
+	# PHASE 2: now the money is "late" -- the sale has ended, and the baseline
+	# is rewound below a payment that really exists, so the observation the
+	# reconciler performs is genuine even though the arrival was not late in
+	# wall-clock terms.
+	extras["intent"]["baseline"]["tip"] = WATCHED_PAYMENT_HEIGHT - 1
+	late.db_set("identity_extras", json.dumps(extras), update_modified=False)
+	late.reload()
 
 	swept_late = reconcile_module.sweep_late_payments()
 	late.reload()
