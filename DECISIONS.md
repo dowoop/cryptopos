@@ -1194,3 +1194,34 @@ never the whole, because every fixture that could have exercised the whole used
 data old enough to hide the defect. `make fit` and the probes now cover
 deployment facts; **this one was a deployment fact too, and nothing was looking
 at it.**
+
+## D20 · The amount-bound invoice contract — PARTLY SURVIVES, 2026-08-24
+
+The first proposal in this sequence to have a component survive. Attacked as:
+an invoice id that is `keccak256(merchant, token, amount, deadline, salt)`, with
+the contract recomputing the hash from the payer's arguments and pulling exactly
+`amount` — so no merchant signature is needed, because every term is bound into
+the id rather than attested by a signer.
+
+**What survives.** *"The hash binding fixes the original D5 misattribution
+attack."* Dust cannot consume an invoice (a wrong amount reverts), replay fails
+on the used-id check, and reading an id off a screen buys nothing, because
+paying it correctly means paying the full invoice. D15's objection — possession
+of an id is authority — does not carry against terms bound into the id.
+
+**What does not.**
+
+- **Two-second finality is not "nothing waits".** Polygon documents milestone
+  finality as typically 2–5 s, and a payment landing near the deadline can still
+  be included-but-not-final when the deadline passes. The window is seconds
+  rather than minutes, but D16's `confirming`-expiry problem applies to it — and
+  D17 says that state cannot simply be exempted.
+- **`transferFrom(amount)` does not prove the contract received `amount`.** A
+  fee-on-transfer, rebasing or non-reverting-false token breaks the claim. The
+  contract must measure its own balance before and after and emit the measured
+  delta, not the requested one. Immutable token address is not sufficient on its
+  own.
+
+**So D5 is answerable on Amoy by binding, but the rail is not ready on binding
+alone.** That is a materially better position than D9 or D15 left, and it is the
+first time the answer to "what else breaks" has been a short list.
