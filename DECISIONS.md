@@ -430,6 +430,12 @@ That is disqualifying for "anyone can complete a sale" on its own.
   reads any sale by name, including its address, amount, txid and invoice.
   `poll` checks only the broad `Sales User` role. `grep -c` for
   `has_permission|frappe.session.user|owner` across `api.py` returns **0**.
+  **Since executed, not merely read** — `tools/isolation_probe.py` creates a
+  disposable user with only `Sales User`, calls `api.status` on a sale owned by
+  Administrator, and gets back the URI, the receiving address, the invoiced
+  native amount and the price. It removes the user again and changes no sale.
+  Run it before deciding step 1 of `GOAL.md`: a shop-per-visitor answer is only
+  possible once that probe refuses.
   Owner-based DocType rules alone cannot fix this: `Crypto Sale Event` is a
   child table with no permissions of its own, and Crypto Takings uses
   `frappe.get_all`, which bypasses row permissions by design.
