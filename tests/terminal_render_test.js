@@ -103,6 +103,60 @@ function terminal() {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. What has ARRIVED, while the customer is still standing there.
+//
+// `_pending_state` derives "Confirming" from the best transfer's confirmed
+// flag alone -- not its amount (DECISIONS D17). So a dust payment renders in
+// the same words as a real one, and the live card used to show only the amount
+// INVOICED. These checks are the reason it now shows what was received too.
+// ---------------------------------------------------------------------------
+{
+	const t = terminal();
+
+	t.sale = sale({ state: "confirming", credited_native: "1" });
+	let html = t.awaiting_html();
+	check("a dust payment still says Confirming", html.includes("Confirming"));
+	check("but the live card says how much actually arrived", html.includes("Received 1 satoshi"));
+	check("and says it is short of the invoice", html.includes("short of the invoice"));
+	check("while still showing what was invoiced", html.includes("39,685"));
+
+	t.sale = sale({ state: "confirming", credited_native: "0" });
+	check(
+		"nothing received says nothing about a shortfall",
+		!t.awaiting_html().includes("short of the invoice")
+	);
+
+	t.sale = sale({ state: "confirming", credited_native: "39685" });
+	check(
+		"a payment in full is not called short",
+		!t.awaiting_html().includes("short of the invoice")
+	);
+
+	t.sale = sale({ state: "confirming", credited_native: "40000" });
+	check(
+		"an overpayment in flight is not called short either",
+		!t.awaiting_html().includes("short of the invoice")
+	);
+
+	// The whole reason fmt_native uses BigInt: this pair differs only past the
+	// 2^53 boundary, so a comparison through a double would call it paid.
+	t.sale = sale({
+		state: "confirming",
+		unit_name: "wei",
+		invoiced_native: "1785714285714285123",
+		credited_native: "1785714285714285000",
+	});
+	check(
+		"a wei shortfall below 2^53 precision is still seen",
+		t.awaiting_html().includes("short of the invoice")
+	);
+	check(
+		"and the received amount keeps its last digits",
+		t.awaiting_html().includes("1,785,714,285,714,285,000")
+	);
+}
+
+// ---------------------------------------------------------------------------
 // 3. Four endings, and each says only what it can stand behind.
 // ---------------------------------------------------------------------------
 {

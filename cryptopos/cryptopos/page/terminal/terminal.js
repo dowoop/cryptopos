@@ -312,6 +312,40 @@ class CryptoPosTerminal {
 	awaiting_html() {
 		const s = this.sale;
 		const words = { awaiting: __("Awaiting payment"), detected: __("Seen, not yet mined"), confirming: __("Confirming") };
+
+		// What has actually ARRIVED, whenever that is not the whole invoice.
+		//
+		// The ending cards have always said this -- "PART PAID", and the
+		// received-against-invoiced line for an overpayment. The live card
+		// never did, so a cashier watching a sale confirm saw the amount ASKED
+		// FOR and nothing about the amount PAID. That matters because
+		// `_pending_state` in watch.py derives "Confirming" from the best
+		// transfer's confirmed flag alone -- not its amount, not attribution,
+		// not timeliness (DECISIONS D17). One satoshi against a 39,685 satoshi
+		// invoice therefore renders exactly like the real thing, and the
+		// operator hands over the goods.
+		//
+		// The rail card three methods up states the principle this restores:
+		// the operator "is entitled to know ... before the customer is
+		// standing there."
+		//
+		// BigInt for the same reason fmt_native uses it: wei does not fit in a
+		// double, and a comparison that silently rounds is worse than none.
+		let short = "";
+		try {
+			const credited = BigInt(s.credited_native || "0");
+			const invoiced = BigInt(s.invoiced_native || "0");
+			if (credited > 0n && credited < invoiced) {
+				short = `<div class="cpos-short">${__("Received")} ${this.fmt_native(
+					s.credited_native
+				)} ${frappe.utils.escape_html(s.unit_name || "")} ${__("so far")} — ${__(
+					"short of the invoice"
+				)}.</div>`;
+			}
+		} catch (_ignored) {
+			short = "";
+		}
+
 		return `${this.notice_html()}
 		<div class="cpos-card cpos-await">
 			<div class="cpos-state cpos-state-live">${words[s.state] || s.state}</div>
@@ -319,6 +353,7 @@ class CryptoPosTerminal {
 			<div class="cpos-native">${this.fmt_native(s.invoiced_native)} <span>${
 				frappe.utils.escape_html(s.unit_name || "")
 			}</span></div>
+			${short}
 			<div class="cpos-usd">${this.fmt_usd(s.usd_cents)}</div>
 			${this.provenance_html(s)}
 			<div class="cpos-uri" title="${frappe.utils.escape_html(s.uri || "")}">${
