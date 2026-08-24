@@ -176,4 +176,7 @@ fit: ## Can this deployment be shown to strangers? (D5, D11, D15)
 	@echo "    bench --site erp.localhost execute cryptopos.tools.isolation_probe.run"
 	@echo "        can one visitor read another's sale? (D11 finding 2)"
 	@echo
+	@echo "    bench --site erp.localhost execute cryptopos.tools.reorg_probe.run"
+	@echo "        does every booked sale still have a live transaction? (D15)"
+	@echo
 	@echo "  Both must refuse before this deployment is public. See GOAL.md."

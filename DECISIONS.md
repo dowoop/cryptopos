@@ -778,7 +778,12 @@ neither the log nor the funds, and ERPNext says paid forever** — `may_book`
 checks positive credited value and a transaction id, not that the block
 survived.
 
-Closing that means settling on finality. So the number that matters is
+Closing that means settling on finality. Until that is decided,
+`tools/reorg_probe.py` at least *detects* it: for every sale carrying a
+transaction id it asks the chain whether that transaction is still there and
+still confirmed. Run against this instance on 2026-08-24 it checked 16 sales and
+found none missing — so the defect is real and has not yet fired here. It
+corrects nothing, because D10 says a terminal state is not edited afterwards. So the number that matters is
 time-to-finality, and it is not 12 seconds. Measured live on Sepolia,
 2026-08-24:
 
