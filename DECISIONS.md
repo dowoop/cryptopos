@@ -698,3 +698,93 @@ options, none yet taken:
 
 Only the second is a route to an unattended demo, and it requires answering D5
 and D9 on the EVM rails rather than avoiding them by choosing Bitcoin.
+
+## D15 · A payment contract on Sepolia — REJECTED, 2026-08-24, and it corrects D14
+
+D14 named one route to an unattended demo: move to a fast chain and fix
+attribution with the payment contract D9 itself described. That was written down
+and attacked. It lost, and in losing it **corrected a measurement recorded in
+D14 and in `GOAL.md`.**
+
+**It is not a payment contract; it is a custody vault with an attacker-controlled
+memo field.** `pay(bytes32 invoiceId)` proves only that *a caller supplied these
+bytes*. Nothing proves the terminal issued the ID, that it is open, that the
+token and amount are right, or that the caller is entitled to pay it. The
+terminal creates the amount and expiry in its database only. So:
+
+- single-use IDs let an attacker consume an active invoice with one wei, and the
+  real payment then reverts;
+- repeatable IDs let them dust every open invoice, and every unpaid sale ends
+  holding real partial money that needs review — **the unattended demo becomes
+  an attended reconciliation queue**;
+- enforcing terms on-chain requires either a per-invoice registration
+  transaction (a signer in the terminal, which D9 forbids) or a merchant
+  signature (an online signing key).
+
+And this instance makes it easy: sale names are a predictable naming series and
+`api.status` performs no permission check, so the IDs need not even be guessed
+(D11 again). D5 is not removed — it is relocated into bearer-capability
+security, where possession of the ID is authority over the sale.
+
+**The watcher would reproduce D5 anyway.** The EVM observers match `to ==
+recipient` and canonical ERC-20 `Transfer` logs; neither reads calldata or a
+`Paid` event. Two one-ETH invoices, one `pay(invoiceB)` call, and invoice A's
+observer still sees a one-ETH transaction to the shared contract. This needs a
+new contract-specific adapter, not a changed recipient address.
+
+**Transaction hashes stop being payment identities.** Claims are held by
+transaction hash across every sale at the recipient; contract payments are *log
+records*. One helper contract can pay two invoices in one transaction — same
+hash, different log index — and whichever sale polls first claims it while the
+other goes to `needs_review`. The durable identity has to become
+`(chain, contract, txHash, logIndex)`, which changes `TransferObservation`, the
+claim store, the receipt and reconciliation.
+
+---
+
+### The correction: "Sepolia is 0% stranded" measured the wrong gate
+
+D14 concluded that Sepolia's timing is fine, on a measured median block interval
+of **12.0 s** and 0% of payments missing the lock. That measurement is real and
+it answers the wrong question.
+
+Reproduced: `_finalized_tip` returns `None`, and `_is_mature` gates on **three
+confirmations** — about 36 seconds. Three confirmations is not irreversibility.
+The sequence: `Paid` enters block B, the gate passes at B+2, the terminal books
+an ERPNext invoice, B is reorganised away, and the payer replaces the orphaned
+transaction with the same nonce and no payment. **The canonical chain holds
+neither the log nor the funds, and ERPNext says paid forever** — `may_book`
+checks positive credited value and a transaction id, not that the block
+survived.
+
+Closing that means settling on finality. So the number that matters is
+time-to-finality, and it is not 12 seconds. Measured live on Sepolia,
+2026-08-24:
+
+| gate | lag behind tip | against the 15-minute lock |
+|---|---|---|
+| 3 confirmations (what runs today) | ~36 s | fits — and is reorg-unsafe |
+| `safe` (justified checkpoint) | **10.8 min** | fits, leaving ~4 min for the customer to act |
+| `finalized` | **17.2 min** | **does not fit** |
+
+**So every rail is either fast and unsafe, or safe and too slow.** testnet4 is
+too slow at one confirmation (D11, ~25%). Sepolia is fast at three confirmations
+and can permanently false-book; at finality it is slower than the lock. The
+liveness trilemma of D13 was not a Bitcoin problem — Bitcoin was just where it
+was noticed first.
+
+**What this does to D14's options.** Option 2 — "demonstrate on a fast chain and
+fix attribution instead" — was the only route to an unattended demo, and it is
+not open as stated. What remains genuinely available:
+
+1. **Say the number on the screen** (D14 option 1), unchanged and still honest.
+2. **Keep a human in the loop** (D14 option 3), unchanged.
+3. **Settle Sepolia on `safe` rather than on three confirmations**, and accept
+   that a visitor has roughly four minutes of the lock to act. This is new, it
+   is measured, and it is the only variant of option 2 the numbers still permit
+   — but it needs the contract-authorisation problem above solved first, and
+   that is a different architecture, not a configuration change.
+
+**One more, easily missed:** `usdc-pol` is an Amoy rail. A contract deployed on
+Sepolia cannot receive or identify its payments; that rail needs its own
+deployment or must be switched off.
