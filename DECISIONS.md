@@ -1119,3 +1119,78 @@ measured.
 The lesson is the one this register keeps relearning: **a claim about "every X"
 earns its quantifier by measurement.** Two of the four rails here were measured
 and two were assumed, and the conclusion was drawn from all four.
+
+## D19 · The first genuine sale, and the nine-hour bug that had prevented every one before it — 2026-08-24
+
+**A real sale completed end to end on this instance for the first time.**
+`CPS-2026-00244`: charged on `eth`, paid from the bundled wallet, settled
+against a real Sepolia transaction, booked into ERPNext.
+
+```
+state      confirmed / clean
+credited   396000000000000 of 396000000000000 wei   (exact)
+tx         0x8cba42e29ea86bbc4a72b86970c623a511743896357623632f4efd874bd6f935
+invoice    ACC-SINV-2026-00052
+events     charge -> confirmed (three-confirmation Sepolia gate) -> booked
+```
+
+Getting there took three attempts, and each failure was a real defect.
+
+**1. The payer talked to the simulator.** `pay_cryptopos_sale.py` ran with
+`app_state.mode` defaulting to `"demo"`, which has no endpoint ladder, so
+`blockchain.call_node` routed to `simulator` and died on
+`eth_getTransactionCount does not exist` — having signed nothing. The GUI never
+met this because its mode switch is a real control. Fixed by having the script
+declare the world it operates in, which is the same declaration the funding card
+already makes.
+
+**2. The second payment was genuinely late** — fifteen minutes passed while the
+first defect was diagnosed. Recorded here because it is the only one of the
+three that was *correct* behaviour: the sale reached `confirming` ("mined,
+1/3 confs") and was then refused as arriving after expiry. D11's failure mode,
+demonstrated live rather than argued.
+
+**3. The one that matters: `expires_at_epoch` was nine hours in the past.**
+
+`now_datetime()` returns a **naive** datetime in the **site's** timezone.
+`datetime.timestamp()` reads a naive value as the **process's** local time.
+Those agree only if the two timezones match, and here they do not — measured:
+
+| | |
+|---|---|
+| site `time_zone` | `America/Adak` |
+| container `TZ` | unset, so UTC |
+| `now_datetime().timestamp()` | 1787549695 |
+| `time.time()` | 1787582095 |
+| **error** | **32400 s, exactly nine hours** |
+
+Both adapters credit a transfer only when
+`block_time_epoch <= expires_at_epoch`. With expiry nine hours behind the
+present, **a payment made now was always "after expiry", on every rail.**
+
+**Why nothing caught it, which is the part worth keeping.** The harness's
+fixtures point at payments that are genuinely days old, and a days-old block
+time compares perfectly well against an expiry nine hours in the past. So
+**76/76 harness checks, 604 core tests, 120 render and 129 button checks were
+all green while no live sale could settle at all.** Fifty sales had been taken
+here and not one was a genuine end-to-end settlement — which I only noticed by
+asking the database whether any settled sale carried a transaction id the
+harness had not fabricated.
+
+**Fixed** with `_epoch()` in `charge.py`, which attaches the site timezone
+before converting. Verified to zero skew, then verified by the sale above.
+
+### What this says about the rest of this register
+
+D11 through D18 are twenty thousand words about why a sale might not settle. The
+reason none of them settled was a timezone conversion, and **no amount of
+attacking architectures would have found it** — it took charging a sale, paying
+it, and watching what the terminal said. Codex was right eight times about
+designs; the thing actually standing in the way was in neither the design nor
+the adapters.
+
+**The lesson, and it is not a new one here:** the suites proved the parts and
+never the whole, because every fixture that could have exercised the whole used
+data old enough to hide the defect. `make fit` and the probes now cover
+deployment facts; **this one was a deployment fact too, and nothing was looking
+at it.**
