@@ -791,7 +791,15 @@ time-to-finality, and it is not 12 seconds. Measured live on Sepolia,
 |---|---|---|
 | 3 confirmations (what runs today) | ~36 s | fits — and is reorg-unsafe |
 | `safe` (justified checkpoint) | **10.8 min** | fits, leaving ~4 min for the customer to act |
-| `finalized` | **17.2 min** | **does not fit** |
+| `finalized` | **17.2 min** (14.0–18.6 across four samples) | **straddles it** |
+
+**Two corrections to this table, both made later the same day.** Sepolia's
+finality was sampled four times and ranged **14.0–18.6 min** — it *straddles*
+the 15-minute lock rather than sitting past it, so "does not fit" was too
+absolute. A gate that is sometimes inside the lock and sometimes outside is
+still unusable for a demo, but for a different reason: it is unpredictable, not
+uniformly slow. And **the generalisation below is false** — see D18, which
+measures `polygon:amoy` finalizing in about two seconds.
 
 **So every rail is either fast and unsafe, or safe and too slow.** testnet4 is
 too slow at one confirmation (D11, ~25%). Sepolia is fast at three confirmations

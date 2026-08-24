@@ -97,17 +97,27 @@ def finality_lag(url):
                            "params": [tag, False]}).encode()
         request = urllib.request.Request(url, data=body, headers=headers)
         with urllib.request.urlopen(request, timeout=30) as response:
-            result = json.load(response)["result"]
-        return None if result is None else int(result["timestamp"], 16)
+            result = json.load(response).get("result")
+        if not result:
+            return None
+        return int(result["timestamp"], 16), int(result["number"], 16)
 
-    tip = block("latest")
+    # Blocks as well as seconds. A two-second lag and a tag that is simply
+    # aliased to `latest` report the same "0.0 min", and on Amoy the honest
+    # answer really is about two seconds -- so the height is what tells them
+    # apart. Reporting only the time is why this rail was dismissed unmeasured
+    # through D14 and D15; see D18.
+    top = block("latest")
     lags = {}
     for tag in ("safe", "finalized"):
         try:
-            stamp = block(tag)
+            answer = block(tag)
         except Exception:
-            stamp = None
-        lags[tag] = None if stamp is None else tip - stamp
+            answer = None
+        if answer is None or top is None:
+            lags[tag] = None
+        else:
+            lags[tag] = (top[0] - answer[0], top[1] - answer[1])
     return lags
 
 
@@ -165,17 +175,23 @@ def main(argv=None):
         lags = finality_lag(RPC_ENDPOINTS[arguments.rpc])
         print()
         print("  but the interval is not this rail's gate — see DECISIONS.md D15:")
-        print(f"    3 confirmations (what runs today)  ~{3 * 12 / 60:.1f} min"
+        # From the measured median, not a hardcoded block time. Amoy's blocks
+        # are ~2 s and Sepolia's ~12 s, and one constant for both was wrong for
+        # whichever rail it was not written for.
+        median_interval = statistics.median(intervals)
+        print(f"    3 confirmations (what runs today)  ~{3 * median_interval:.0f} s"
               "  — fits the lock, and a reorg can unbook it")
         for tag in ("safe", "finalized"):
             lag = lags.get(tag)
             if lag is None:
                 print(f"    {tag:<34} unavailable from this endpoint")
                 continue
-            verdict = "fits" if lag <= arguments.lock else "DOES NOT FIT"
-            print(f"    {tag:<34} {lag / 60:5.1f} min  — {verdict}")
+            seconds, blocks = lag
+            verdict = "fits" if seconds <= arguments.lock else "DOES NOT FIT"
+            print(f"    {tag:<34} {seconds / 60:5.1f} min"
+                  f" ({blocks} block{'' if blocks == 1 else 's'} behind tip)  — {verdict}")
         finalized = lags.get("finalized")
-        if finalized is not None and finalized > arguments.lock:
+        if finalized is not None and finalized[0] > arguments.lock:
             print()
             print(f"FAIL: a settlement that cannot be unbooked needs"
                   f" {finalized / 60:.1f} min and the lock is"
