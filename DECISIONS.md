@@ -1225,3 +1225,58 @@ of an id is authority — does not carry against terms bound into the id.
 **So D5 is answerable on Amoy by binding, but the rail is not ready on binding
 alone.** That is a materially better position than D9 or D15 left, and it is the
 first time the answer to "what else breaks" has been a short list.
+
+## D21 · D5 measured: the shared address does not lose money, it poisons the neighbours — 2026-08-24
+
+D5 has been argued since it was written — seven attack sequences — and never
+run. With D19's clock bug fixed, live sales settle, so it could finally be run.
+Three real Sepolia payments, one shared address.
+
+**Trial 1 — two concurrent sales, identical address, identical amount.**
+`CPS-2026-00255` (A) and `CPS-2026-00256` (B) charged seconds apart, both for
+396000000000000 wei to `0x611Ec5…D136`. **Only B was paid.**
+
+> B settled correctly — credited 396000000000000, booked `ACC-SINV-2026-00055`.
+> A did **not** take it.
+
+**Trial 2 — an older open sale against a later payment.** A was still in flight.
+`CPS-2026-00257` (C) was charged and paid.
+
+> C settled correctly — booked `ACC-SINV-2026-00056`. A did **not** take it.
+
+**So there was no theft, in either direction, and that is the claimed set doing
+real work.** `_claimed_transaction_ids` reads `FOR UPDATE` and a transaction
+bound by one intent cannot be credited to another.
+
+**But look at what happened to A:**
+
+```
+state          needs_review
+end_kind       unidentified
+credited       0 of 396000000000000
+sighted        0
+review_reason  one or more observed transactions are already claimed by another intent
+```
+
+**A was never paid and never stole anything, and it still did not end cleanly.**
+It ends in an operator-facing review state — not because money arrived that it
+could not bind, but because money arrived *for somebody else* at the address it
+was watching.
+
+**That is the real cost of a shared address, and it is not the one D5
+predicted.** D5 feared a payment credited to the wrong sale. What actually
+happens is milder and broader: **every unpaid sale that overlaps a paid one is
+collateral damage.** In a public demo with strangers charging concurrently, the
+common case is not theft — it is that most sales end `NEEDS REVIEW` instead of
+`EXPIRED`, and an operator is handed a queue of them.
+
+**One structural fact reproduced alongside it.** `heartbeat` selects in-flight
+sales with `frappe.get_all(..., pluck="name")` and **no `order_by`**, so which of
+two simultaneously-pollable sales reaches a transaction first is decided by an
+unspecified database ordering. Attribution held in both trials; nothing in the
+code guarantees it will.
+
+**What this changes.** D5's conclusion stands — a shared address cannot be made
+safe — but the argument for fixing it is now the *demo experience*, not the
+ledger. The answer is still D20's binding, and the reason to want it is that
+without it a public instance produces review queues, not wrong invoices.
