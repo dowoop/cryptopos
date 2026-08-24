@@ -446,6 +446,13 @@ That is disqualifying for "anyone can complete a sale" on its own.
   native amount and the price. It removes the user again and changes no sale.
   Run it before deciding step 1 of `GOAL.md`: a shop-per-visitor answer is only
   possible once that probe refuses.
+
+  **And D19 made this worse, which is worth noticing.** When the probe was first
+  run it leaked `uri`, `identity_address`, `invoiced_native` and `usd_cents` —
+  `tx_id` and `sales_invoice` were empty on every sale, because no live sale
+  could settle. Re-run after the clock fix, it leaks those two as well. **The
+  isolation defect did not change; the amount of truth behind it did.** A
+  deployment that starts working starts having more to leak.
   Owner-based DocType rules alone cannot fix this: `Crypto Sale Event` is a
   child table with no permissions of its own, and Crypto Takings uses
   `frappe.get_all`, which bypasses row permissions by design.
