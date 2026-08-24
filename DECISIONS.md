@@ -956,3 +956,83 @@ latter — the same 15-minute economic quote, the same real USD invoice, the sam
 mutable ERPNext settings, the same refusal of an online authorisation key. None
 of that is in the goal. **If it is a demonstration, the unattended goal is
 achievable**, and the first step is small: stop expiring `confirming` sales.
+
+## D17 · An ending requires evidence, and `confirming` sales never expire — REJECTED, 2026-08-24
+
+D16 ended with two proposals. Both were written up and attacked. Both lost, and
+one of them was **dangerous**, which is why it is worth more than the six
+rejections before it.
+
+**Point 3 — "a `confirming` sale is not expired at all" — is an immortal-dust
+vulnerability.** It assumed `confirming` means *"the full, attributable invoice
+amount was included on time, and only maturity remains."* **It means nothing of
+the kind.** Reproduced, and `_pending_state`'s own docstring gives it away — it
+is *"for the screen"*, and *"derived from the observations rather than stored"*:
+
+```python
+best = max(batch.transfers, key=lambda transfer: transfer.confirmations)
+if best.confirmed:
+    return "confirming", f"mined, {best.confirmations}/{gate} confs"
+```
+
+It checks the *confirmed flag of the largest-confirmation transfer*. Not the
+amount. Not attribution. Not timeliness. So:
+
+1. Charge a BTC sale for 100,000 sat and let its lock expire.
+2. Send **one satoshi** to its per-sale address and let it mine.
+3. Settlement returns PENDING, because 1 sat is below the invoice — so
+   `_pending_state` returns `confirming`.
+4. With `confirming` removed from expiry, **the sale never ends**, and the
+   heartbeat selects it forever.
+
+**One satoshi per sale, permanently.** On the shared-address EVM rails one small
+transfer can pin every overlapping sale at once, because underpayments never
+enter the claimed-transaction set. That makes D11's starvation attack *cheaper*,
+which is the opposite of the intent.
+
+**And it needs no attacker.** Reproduced:
+`LEGAL["confirming"] = {"confirmed", "expired", "failed", "needs_review"}` —
+there is **no `confirming -> awaiting`**. A full payment observed in a block
+moves the sale to `confirming`; a reorg removes that block; the next observation
+finds nothing; and with expiry gone the sale is stranded in `confirming` with no
+legal transition out.
+
+**Point 1 — "an ending requires evidence" — is already implemented, and its
+boundary is contaminated.** `watch.py` already distinguishes the three answers
+and already retries a failed look while the lock has time (see D16's own
+correction). What it wraps is `except Exception`, which catches settlement bugs,
+pagination bugs, `_claimed_transaction_ids` database failures and ordinary
+programming errors alongside transport failures. **An observation can succeed
+and settlement then throw, and it is recorded as "did not reach the chain".** A
+grace counter on that boundary retries deterministic defects four times and
+files them as provider outages.
+
+Nor is "the provider answered empty" conclusive: Bitcoin accepts any tip not
+behind the baseline without establishing the provider is current, and the EVM
+adapters have no mempool observation at all.
+
+**Point 2 — the bounded grace — bounds neither time nor population.** A
+heartbeat count is not elapsed time: `poll` is whitelisted and checks no
+ownership (D11 finding 2, again), so anyone can burn the four retries in
+seconds. With no admission quota the retained population is unbounded, and four
+retries multiply provider pressure into a synchronised retry herd — **the grace
+can reduce the chance any of its own observations succeeds.** Worse, a payer who
+can induce the expiry observation to fail gains an outage-conditioned price
+option, because timeliness is decided by a block header timestamp the payer may
+influence.
+
+**What a safe version would need**, and it is not a patch: a distinct state
+meaning *fully paid, on time, awaiting maturity*, enforced as an invariant
+rather than derived for display, plus a defined reorg path out of it.
+
+### Correction to D16
+
+D16 says the `confirming` gap is "still real ... but latent". **Amend that: it is
+latent and acting on it as written would introduce a one-satoshi denial of
+service.** The insight D16 recovered — that the payment deadline and the
+maturity deadline are different — stands. The change it proposed does not.
+
+`needs_review/unverified` is also not the terminal saying a sale went unpaid. It
+is the state machine's explicit representation of *uncertainty*. The clock
+decides when automation stops; it does not fabricate a conclusion. That is a
+defensible design and I mistook it for a defect twice.
