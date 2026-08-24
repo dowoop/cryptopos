@@ -1097,6 +1097,17 @@ shared with the two Sepolia rails (`rails_probe` reports it). That is the
 bounded problem — per-sale addresses or a payment binding — and D9's gas
 objection is the thing to answer, not a timing impossibility.
 
+**And the obvious cheap fix does not work, which is worth writing down before
+somebody tries it.** "Give each sale a unique amount and match on it" fails
+against this adapter, because `EvmRail.settle` does not match a transfer to an
+invoice — it **sums** every unclaimed timely transfer and settles when
+`credited >= intent.amount_native`. Reproduced in `evm.py`. So with sales A
+(10.00) and B (10.01) at one address, a 10.01 payment intended for B is seen by
+A first, satisfies `>=`, and settles A; B is left holding nothing. Distinct
+amounts do not survive an aggregating comparison. This is D5's own conclusion
+arriving through the arithmetic rather than through the attack sequences:
+**a shared address cannot be made safe by bookkeeping.**
+
 ### Correction to D14, D15, D16 and GOAL.md
 
 Every one of them says or implies that no rail is both fast enough and safe
