@@ -463,3 +463,76 @@ to exist first, and none of them is chain code in `cryptopos_core`:
    model is also the only one where the demo's float can be recycled with one
    signed transaction, which is why D9's gas objection does not apply to it.
 3. **Ownership in the API**, enforced per endpoint, not per DocType.
+
+## D12 · Splitting the rate lock into price-validity and acceptance — REJECTED, 2026-08-24
+
+D11 measured the 15-minute lock as too short for testnet4 and named a longer
+acceptance window as "the cheapest fix and the one that buys the most". That
+fix was written down and attacked, and it lost.
+
+The proposal: keep `price_valid_until` at 15 minutes for *making* a payment,
+add a longer `accept_until` for *crediting* one already broadcast, derive it
+from the rail's block time, credit at the rate locked at charge.
+
+**Rejected. It does not create two windows; it creates one longer price lock.**
+
+**The exploit, and it needs no bug.** Settlement checks the confirmation's
+block time against the intent expiry and nothing else. It never establishes
+when a transaction was first broadcast — and it cannot, because
+`TransferObservation` carries `block_height` and `block_time_epoch` and **no
+first-seen field** (reproduced, `plugin.py:205`). So:
+
+1. 12:00, BTC at $100k. Open a $100 sale, receive a request for 100,000 sat.
+2. Save the URI. Broadcast nothing.
+3. 12:30, BTC at $50k. Broadcast the 100,000 sat now.
+4. It confirms at 12:40, inside the proposed window. The sale settles and books
+   $100 against crypto then worth $50. Had the price risen, abandon the quote.
+
+That is a free put option written by the merchant, exercisable by anyone who
+keeps a URI. Fresh-address attribution does not help: the payment is perfectly
+attributable and previously unclaimed. Adding a first-seen time would not help
+either — a low-fee RBF transaction broadcast at minute 14 can be bumped if the
+price falls and replaced if it rises. A mempool transaction is not a payment.
+
+**And the prices really do move, even here.** `rates.quote` reaches
+`cryptopos_core.rates._gather`, which asks live feeds — so a testnet sale is
+priced at the live mainnet market. The coins are valueless; the *quote* is not
+fixed. This is the same root defect recorded against a crypto position report
+in D6, arriving through a different door: **a test token priced at a real
+market rate.**
+
+**Three further claims, all reproduced.**
+
+- `real_block_time` is prose (`"~10 min"`), not a policy number, and the
+  persisted `Crypto Rail` row does not carry it at all — only
+  `sim_block_seconds`. The derivation could not read the field it needed.
+- The architect's own arithmetic was wrong: 4 x ~10 min is 40 minutes, not the
+  80 claimed in the proposal.
+- The longer window multiplies D11's starvation path. The heartbeat polls every
+  in-flight sale sequentially; moving expiry from 15 to 80 minutes grows the
+  steady-state unpaid population about 5.3x for the same attack rate.
+
+**The trilemma that kills "nothing else moves".** At minute 15 the code must
+either expire a sale whose honest payment the provider merely had not indexed
+yet (terminal, and D10 forbids later settlement), or keep every sale alive to
+minute 80 (making late first-broadcasts indistinguishable from timely ones), or
+end the sale at 15 and settle it later (reopening a terminal state, violating
+D10). There is no fourth option without a new durable commitment concept.
+
+**What survives.** D11's measurement stands: 15 minutes is too short for a
+chain whose median interval measured 20.0 minutes, and about a quarter of
+honest sales fail. The problem is real; this fix is not the answer.
+
+**Where an answer would have to come from.** The option is only free because
+the price can move between quote and confirmation. Two directions, neither
+taken yet:
+
+1. **Quote a fixed operator rate for testnet.** A valueless token has no market
+   price, so tracking one is dishonest as well as exploitable — this is the
+   position already taken elsewhere in this workspace. A quote that cannot move
+   makes the option worthless and lets the acceptance window be as long as the
+   chain needs.
+2. **Price at confirmation, not at charge.** Removes the option, at the cost of
+   the customer not knowing what they will pay.
+
+Both change what a sale *is*, which is why neither is a patch.
