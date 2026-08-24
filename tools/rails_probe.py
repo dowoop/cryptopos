@@ -54,26 +54,38 @@ def run():
         if not rail.enabled:
             continue
         if kind == "shared":
-            # Group by (chain, address), not by address. One address is valid on
-            # every EVM chain, and two rails holding it on DIFFERENT chains are
-            # watching different ledgers -- that is not D5's collision. Two on
-            # the SAME chain are.
-            chain = (rail.get("catalog_key") or "").split("/")[0] or "?"
-            shared_by_address.setdefault((chain, detail), []).append(rail.name)
+            # Group by (catalog_key, address). The FIRST version of this grouped
+            # by (chain, address) and reported `eth` and `usdc-eth` colliding on
+            # Sepolia. They do not, and the difference matters because a gate
+            # that cries wolf is worse than no gate.
+            #
+            # Reproduced in `evm.py`: the native observer takes a transaction
+            # only when `to == recipient` AND `value != 0`, and a USDC transfer
+            # has `to` = the token contract and `value` = 0. The token observer
+            # queries `eth_getLogs` with `"address": self.token_contract` and
+            # re-checks every log against it. So the two rails observe disjoint
+            # transaction shapes at the same address and cannot take each
+            # other's payments.
+            #
+            # `catalog_key` already encodes chain and asset -- `native:eth` vs
+            # `erc20:0x1c7d...` -- so two rails collide exactly when their
+            # catalog_key and their recipient are both the same.
+            key = rail.get("catalog_key") or "?"
+            shared_by_address.setdefault((key, detail), []).append(rail.name)
         elif kind == "none":
             problems.append(
                 f"{rail.name} is enabled with neither an xpub nor a recipient")
 
     print()
-    for (chain, address), names in sorted(shared_by_address.items()):
+    for (key, address), names in sorted(shared_by_address.items()):
         if len(names) > 1:
             problems.append(
-                f"{len(names)} enabled rails share {address} on {chain}: "
-                f"{', '.join(names)} — one payment, several claimants")
+                f"{len(names)} enabled rails are the same asset at {address} "
+                f"({key}): {', '.join(names)} — one payment, several claimants")
         else:
             problems.append(
-                f"{names[0]} receives at a static address on {chain} "
-                f"({address}) — D5 says attribution there is not a binding")
+                f"{names[0]} receives at a static address ({address}) — D5 says "
+                "attribution there is not a payment binding, whatever else shares it")
 
     if not problems:
         print("  OK: every enabled rail binds payments to a fresh address per sale.")

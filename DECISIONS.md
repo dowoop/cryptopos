@@ -460,11 +460,21 @@ That is disqualifying for "anyone can complete a sale" on its own.
   flag. Confirmed on the running instance: `btc`, `eth`, `usdc-eth`, `usdc-pol`
   all enabled, and **all three EVM rails share one recipient address** —
   D5's problem, tripled across rails. BTC-only has to be enforced at startup.
-  `tools/rails_probe.py` now reports this without waiting for a payment: it
-  groups by (chain, address), so it separates the genuine Sepolia collision
-  (`eth` and `usdc-eth`, one payment with two claimants) from `usdc-pol`, which
-  is a lone static address on Amoy and D5's weaker binding rather than a
-  collision. It exits non-zero while either stands.
+  `tools/rails_probe.py` reports this without waiting for a payment, and exits
+  non-zero while it stands.
+
+  **Corrected 2026-08-24: there is no cross-rail collision, and an earlier
+  version of this entry claimed one.** The probe first grouped by
+  (chain, address) and reported `eth` and `usdc-eth` taking each other's
+  payments on Sepolia. They cannot. Reproduced in `evm.py`: the native observer
+  accepts a transaction only when `to == recipient` **and** `value != 0`, and a
+  USDC transfer has `to` = the token contract and `value` = 0; the token
+  observer queries `eth_getLogs` with `"address": self.token_contract` and
+  re-checks every log against it. **The two rails observe disjoint transaction
+  shapes at one address.** Rails collide only when `catalog_key` *and* recipient
+  both match, which is how the probe groups now. What is left is the real
+  finding and it is unchanged: three rails each receive at a static address,
+  which is D5 whatever else shares it.
 
 **Accepted on mechanism, not reproduced end to end.** A visitor can flood
 unpaid sales, and every in-flight sale is polled sequentially against public
