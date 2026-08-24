@@ -450,6 +450,11 @@ That is disqualifying for "anyone can complete a sale" on its own.
   flag. Confirmed on the running instance: `btc`, `eth`, `usdc-eth`, `usdc-pol`
   all enabled, and **all three EVM rails share one recipient address** —
   D5's problem, tripled across rails. BTC-only has to be enforced at startup.
+  `tools/rails_probe.py` now reports this without waiting for a payment: it
+  groups by (chain, address), so it separates the genuine Sepolia collision
+  (`eth` and `usdc-eth`, one payment with two claimants) from `usdc-pol`, which
+  is a lone static address on Amoy and D5's weaker binding rather than a
+  collision. It exits non-zero while either stands.
 
 **Accepted on mechanism, not reproduced end to end.** A visitor can flood
 unpaid sales, and every in-flight sale is polled sequentially against public
