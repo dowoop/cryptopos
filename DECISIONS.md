@@ -536,3 +536,84 @@ taken yet:
    the customer not knowing what they will pay.
 
 Both change what a sale *is*, which is why neither is a patch.
+
+## D13 · A fixed operator quote for testnet — REJECTED, 2026-08-24
+
+D12 left one route open: if the quote cannot move, its free option is worthless
+and the acceptance window can be widened. That route was taken, written down,
+and attacked. It lost, and the loss generalises past pricing entirely.
+
+**"Fixed until the operator changes it" is not fixed for the life of an
+outstanding quote — and that lifetime is exactly what the proposal lengthens.**
+Open a thousand sales at $100/coin, wait for the operator to drop the rate to
+$50, then pay the old URIs at one coin each. If the rate rises instead, abandon
+them. The customer receives the best rate seen across the whole window. The
+underlying changed from Coinbase to the operator's own configuration; the option
+did not go away. `charge.py` freezes the native amount and expiry into the
+intent, so no configuration change can reprice an outstanding URI.
+
+The invariant actually required is: **the configured rate may never decrease
+while any quote issued under the previous rate is still acceptable.** With a
+long window, the operator can never safely lower it.
+
+**And the crypto rate was never the only term frozen (both reproduced).**
+
+- `loyalty_earn_rate` is snapshotted at charge and awards deliberately use the
+  snapshot — `points_for`'s own docstring says the merchant "changes it
+  freely". So a customer can open sales during a promotion, pay none, wait for
+  the promotion to end, and then pay the old URIs to mint points at the expired
+  rate. **The crypto quote never moved and the option was still there.**
+- `settle.py` calls `frappe.get_single("CryptoPoS Settings")` *at settlement*
+  and reads the current customer, item and company — not a charge-time
+  snapshot. An old URI books into whatever configuration exists later.
+
+An arbitrarily long quote is a standing unilateral authorisation to create
+future accounting events under terms that did not exist when it was issued.
+
+**Honesty was not established either.** `settle.py` creates a real
+`Sales Invoice` with `currency = "USD"` for a testnet sale. Naming the source
+`operator-fixed` makes the provenance accurate; it does not make the USD figure
+true. D6 said converting faucet tokens into authoritative currency figures is
+dishonest, and this proposal still does it — now with a deliberately invented
+number. Making it honest means testnet sales stop booking real invoices, which
+is not "nothing else changes".
+
+---
+
+### The result that outlives all three rejections
+
+Block inclusion has **no finite upper bound**. Under D10, which never reopens a
+terminal state, that leaves exactly three options and no fourth:
+
+| choice | what it costs |
+|---|---|
+| a finite acceptance window | a nonzero tail of honest payments is always lost — D11 measured today's tail at ~25% |
+| an unbounded window | perpetual obligations, unbounded watcher state, and every economically relevant term frozen forever |
+| end the sale, settle it later | reopens a terminal outcome — violates D10 |
+
+**This is a liveness trilemma, and no choice of numbers escapes it.** It is why
+D11, D12 and D13 all failed at the same place from three different directions.
+
+### The direction that survives it, and is not yet taken
+
+D10 already builds the record of a late payment; what it does not do is *book*
+it. But a new document is not a reopening. So:
+
+**Let the reconciler book a late payment as a NEW sale, priced at the rate
+current when it confirmed.**
+
+- The old sale still expires on time and is never mutated — **D10 holds.**
+- The new sale is priced at confirmation, so there is nothing to wait for and
+  no term is frozen in advance — **D12 and D13's option disappears.**
+- The customer's money is honoured rather than stranded — **D11's 25% closes.**
+- The acceptance window stays short, so the in-flight population stays bounded
+  — D11's starvation path is not amplified.
+
+The cost is honest and worth stating: the customer sees their sale expire, and
+then sees a second, separate booked sale appear. That is worse UX than a sale
+that simply completes, and it is the first design in this series that does not
+buy its comfort with somebody's money.
+
+**Unchanged and still required before anything is public:** ownership in the
+API (D11), admission quotas and poll throttles (D11, restated here), and
+per-sale addresses or disabled rails on every rail that is enabled (D5, D9).
