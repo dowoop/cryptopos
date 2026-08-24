@@ -1300,3 +1300,48 @@ binding and the flood disappears on its own.**
 safe — but the argument for fixing it is now the *demo experience*, not the
 ledger. The answer is still D20's binding, and the reason to want it is that
 without it a public instance produces review queues, not wrong invoices.
+
+## D22 · D9's gas objection on Amoy, measured — the reason changes, the answer holds
+
+D9 rejected per-sale EVM addresses partly on economics: *"a small sale can cost
+more to collect than it contains."* On a testnet that sentence compares two
+worthless quantities, so it was worth checking whether the objection survives on
+`polygon:amoy` — the rail D18 showed is otherwise ready.
+
+**Measured 2026-08-24:**
+
+| | |
+|---|---|
+| Amoy gas price | 30.00 gwei |
+| native POL send (21,000 gas) | 0.00063 POL |
+| ERC-20 transfer (65,000 gas) | 0.00195 POL |
+| merchant wallet holds | 0.018 POL |
+| customer wallet holds | 0.080 POL |
+
+**The economic form of the objection does not survive, and the operational form
+does — with a number on it.** Collecting from a derived address costs **two**
+transactions, because an EVM account cannot be an input to somebody else's
+transaction the way a UTXO can: fund it with gas (0.00063), then transfer out
+(0.00195). About **0.0026 POL per sale recycled**, and the merchant's current
+balance covers roughly **seven** of them.
+
+So the constraint is not "gas costs more than the sale is worth" — both are
+valueless. It is that **gas is a finite, faucet-supplied resource, and per-sale
+addresses consume two transactions of it per sale, forever.** A public demo that
+recycles its float would drain the POL supply at a fixed rate per visitor and
+need a human at the Polygon faucet to keep running. That is a worse failure than
+a review queue: it stops.
+
+**Which leaves the choice between the two answers to D5, with costs attached:**
+
+| | per-sale addresses | the D20 binding |
+|---|---|---|
+| new artifact | none | a Solidity contract, a class of thing neither repo has |
+| per-sale gas | **2 tx (~0.0026 POL)** | none — the payer pays their own gas |
+| needs a sweeper | yes, off-terminal | one withdrawal for all sales |
+| known outstanding defects | D9's twin-key and wrong-family bugs, already fixed once | must measure its own balance delta, not trust `transferFrom` (D20) |
+| refuted by | — | not refuted; the binding survived attack |
+
+**The binding is the better answer and it was already the surviving one.** What
+this entry adds is that the alternative is not merely inelegant — it has a
+measured running cost that a demo cannot pay indefinitely.
