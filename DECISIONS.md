@@ -373,3 +373,93 @@ baseline below them, and the reconciler finds **3,000,000 satoshi**, records it
 without moving the sale out of its ending, and declines to record it twice.
 
   harness: 76 checks, 0 failures, live network — was 71.
+
+## D11 · A public, multi-visitor testnet demo on this app — REJECTED as specified, 2026-08-24
+
+The long-horizon goal is one hosted ERPNext instance where any stranger can run
+a testnet sale end to end with a prefunded wallet. A five-part architecture was
+written down and attacked cold by Codex, which had not seen the goal before:
+
+1. one merchant, `CryptoPoS Settings` stays Single;
+2. BTC-only, because D7 gives it a fresh address per sale and D5 says the EVM
+   rails cannot be attributed under the concurrency a public demo guarantees;
+3. per-visitor isolation by row, via owner-based permissions;
+4. the prefunded wallet is the customer side, and the sibling repository's
+   payer already exists;
+5. nothing new in `cryptopos_core`.
+
+**Rejected.** Six findings; five reproduced here before being accepted, one
+accepted on its mechanism only. Parts 2, 4 and 5 cannot all be true at once.
+
+**The decisive one, and it needs no attacker (reproduced, measured live).**
+`RATE_LOCK_SECONDS = 15 * 60` (`charge.py:24`), and `bitcoin.py` credits only
+transfers whose `block_time_epoch <= intent.expires_at_epoch` — a confirmation
+after expiry is `late`, never `timely`. Measured against
+`mempool.space/testnet4` on 2026-08-24, over the 14 most recent intervals:
+
+| | |
+|---|---|
+| median block interval | **20.0 min** |
+| mean | 18.8 min |
+| intervals longer than the 15-minute lock | **13 of 14** |
+| chance an immediately-broadcast payment misses the lock | **~25%** |
+
+Testnet4 keeps the 20-minute difficulty-reset rule, so ~20 minutes is where its
+intervals *sit*, not an outlier. The lock is systematically shorter than the
+chain it is used on. And D10's reconciler deliberately never reopens a sale, so
+those sales never settle and never book — they become an audit row. **About one
+honest, immediately-paid sale in four fails permanently, with a perfect payer.**
+That is disqualifying for "anyone can complete a sale" on its own.
+
+**The other reproduced findings.**
+
+- **There is no Bitcoin payer, so a BTC-only demo has no payment path at all.**
+  `customer_wallet.can_pay` returns true for `sol`, `usdc-sol`, `eth`, `pol`,
+  `usdc-eth`, `usdc-pol` — and not `btc`. Found here independently before the
+  attack landed. `wallets.py` has `BTC_MERCHANT_XPUB` (watch-only) and no
+  customer key; `primitives.py` has secp256k1 with RFC-6979, `hash160`, bech32
+  and BIP-32, but nothing builds a Bitcoin *transaction* — no BIP-143 sighash,
+  no witness serialisation, no UTXO selection. The two concurrency-safe halves
+  do not meet: BTC is the only rail safe under strangers, and it is the only
+  rail the payer cannot pay.
+- **The API has no concept of ownership.** `api.status(sale_name)` is
+  `@frappe.whitelist()` with no role check and no permission check, and
+  `frappe.get_doc` does not check permissions by default — any logged-in user
+  reads any sale by name, including its address, amount, txid and invoice.
+  `poll` checks only the broad `Sales User` role. `grep -c` for
+  `has_permission|frappe.session.user|owner` across `api.py` returns **0**.
+  Owner-based DocType rules alone cannot fix this: `Crypto Sale Event` is a
+  child table with no permissions of its own, and Crypto Takings uses
+  `frappe.get_all`, which bypasses row permissions by design.
+- **BTC address allocation is collision-safe but serialises across network
+  I/O.** `catalog.recipient_for` takes `SELECT … FOR UPDATE` on the rail row
+  (`catalog.py:135`), and the transaction then calls `validate_recipient` and
+  `rates.quote` — a price-feed request — before any commit (`charge.py:95`).
+  Two visitors cannot get the same address; they also cannot be charged
+  concurrently. One slow feed blocks address allocation for everyone.
+- **"EVM off" is a wish, not an invariant.** `install.py` seeds all four rails
+  `enabled=1`, and migration deliberately never rewrites an existing rail's
+  flag. Confirmed on the running instance: `btc`, `eth`, `usdc-eth`, `usdc-pol`
+  all enabled, and **all three EVM rails share one recipient address** —
+  D5's problem, tripled across rails. BTC-only has to be enforced at startup.
+
+**Accepted on mechanism, not reproduced end to end.** A visitor can flood
+unpaid sales, and every in-flight sale is polled sequentially against public
+Esplora each heartbeat, with no per-user quota and no poll throttle; a
+rate-limited provider then pushes a legitimately paid sale to `needs_review`,
+which is terminal. Each ingredient is verified; the starvation itself was not
+run.
+
+**What this changes.** The goal is not dead, but it is not a
+deployment-and-permissions job, which is what part 5 claimed. Three things have
+to exist first, and none of them is chain code in `cryptopos_core`:
+
+1. **A rate lock that outlives a testnet4 block**, or settlement that does not
+   depend on confirming inside it. This is the cheapest fix and the one that
+   buys the most.
+2. **A Bitcoin payer** — UTXO selection, BIP-143 sighash, P2WPKH witness,
+   broadcast, and a funded customer branch. `primitives.py` already has every
+   cryptographic part; what is missing is transaction construction. BTC's UTXO
+   model is also the only one where the demo's float can be recycled with one
+   signed transaction, which is why D9's gas objection does not apply to it.
+3. **Ownership in the API**, enforced per endpoint, not per DocType.
