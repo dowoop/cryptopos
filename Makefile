@@ -179,4 +179,10 @@ fit: ## Can this deployment be shown to strangers? (D5, D11, D15)
 	@echo "    bench --site erp.localhost execute cryptopos.tools.reorg_probe.run"
 	@echo "        does every booked sale still have a live transaction? (D15)"
 	@echo
+	@echo "=== and the one that proves the whole path, not the parts (D19) ==="
+	@echo "  Spends testnet money, so it lives beside the payer and refuses by default:"
+	@echo
+	@echo "    cd '../Point of Sale' && python3 prove_end_to_end.py --send"
+	@echo "        charge -> pay -> settle -> book, asserted end to end"
+	@echo
 	@echo "  Both must refuse before this deployment is public. See GOAL.md."
