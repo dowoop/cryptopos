@@ -20,7 +20,7 @@ RUFF     := uvx ruff@$(RUFF_VER)
 MATRIX   := 3.9 3.11 3.13 3.14
 
 .DEFAULT_GOAL := help
-.PHONY: lockcheck help dev test terminal prove worth watch lint fmt matrix wheel check build dist-verify clean docker-check
+.PHONY: fit lockcheck help dev test terminal prove worth watch lint fmt matrix wheel check build dist-verify clean docker-check
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -151,5 +151,29 @@ clean: ## Remove build output, caches and the dev venv
 
 # The measurement behind D11, re-runnable. Not in `make prove`: it needs the
 # network, and a public endpoint being slow is not a defect in this repository.
-lockcheck:
+lockcheck: ## Measure a chain's settlement gate against the rate lock (D11, D15)
 	python3 tools/lockcheck.py
+
+# Is this deployment fit to be shown to strangers? Three findings, three gates.
+#
+# Deliberately NOT part of `make check`: two of these need a live site and the
+# third needs the network, and neither is a property of this source tree. This
+# answers a question about a DEPLOYMENT, which is why it is its own word.
+#
+# It runs what it can from here and names what it cannot, rather than skipping
+# quietly -- a fitness check that passes because it did not look is the failure
+# mode it exists to prevent.
+fit: ## Can this deployment be shown to strangers? (D5, D11, D15)
+	@echo "=== the settlement gate, against the rate lock (D11, D15) ==="
+	@python3 tools/lockcheck.py || true
+	@echo
+	@echo "=== the two gates that need a live site ==="
+	@echo "  These read the database, so they run against the bench, not here:"
+	@echo
+	@echo "    bench --site erp.localhost execute cryptopos.tools.rails_probe.run"
+	@echo "        does any enabled rail receive at an address another shares? (D5)"
+	@echo
+	@echo "    bench --site erp.localhost execute cryptopos.tools.isolation_probe.run"
+	@echo "        can one visitor read another's sale? (D11 finding 2)"
+	@echo
+	@echo "  Both must refuse before this deployment is public. See GOAL.md."
