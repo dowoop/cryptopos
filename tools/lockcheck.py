@@ -13,11 +13,15 @@ noticed if testnet4's timing changes.
     python3 tools/lockcheck.py                 # testnet4, against 15 minutes
     python3 tools/lockcheck.py --lock 3600     # what an hour would buy
     python3 tools/lockcheck.py --blocks 50     # a longer sample
-    python3 tools/lockcheck.py --rpc sepolia   # the EVM side, for comparison
+    python3 tools/lockcheck.py --rpc sepolia   # the EVM side, at the real gate
 
-The comparison is the point. D14 concluded that the only route to an unattended
-demo is a fast chain, and that conclusion rests on Sepolia's interval being as
-short as Bitcoin's is long. Both halves are measured here or neither is.
+**Read D15 before trusting an EVM number from this tool.** Block interval is the
+right quantity for Bitcoin, whose one-confirmation gate is a block. It is the
+WRONG quantity for an EVM rail: the terminal settles Sepolia after three
+confirmations, which a reorg can undo after ERPNext has already booked. The gate
+that would actually be safe is finality, and finality is not twelve seconds. So
+`--rpc` reports the finality lag beside the interval, and judges against the lag.
+Measuring the interval and calling it safety is the exact error D15 corrects.
 
 Read-only, one HTTP GET, no bench and no container.
 """
@@ -77,6 +81,36 @@ def rpc_intervals(url, count):
     return [interval for interval in intervals if interval >= 0]
 
 
+def finality_lag(url):
+    """How far `safe` and `finalized` trail the tip, in seconds.
+
+    The number an EVM rail is actually judged on. `_is_mature` gates on three
+    confirmations today, which is fast and reversible; a settlement that cannot
+    be unbooked has to wait for one of these instead.
+    """
+    headers = {"Content-Type": "application/json",
+               "User-Agent": "cryptopos-lockcheck/1.0"}
+
+    def block(tag):
+        body = json.dumps({"jsonrpc": "2.0", "id": 1,
+                           "method": "eth_getBlockByNumber",
+                           "params": [tag, False]}).encode()
+        request = urllib.request.Request(url, data=body, headers=headers)
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.load(response)["result"]
+        return None if result is None else int(result["timestamp"], 16)
+
+    tip = block("latest")
+    lags = {}
+    for tag in ("safe", "finalized"):
+        try:
+            stamp = block(tag)
+        except Exception:
+            stamp = None
+        lags[tag] = None if stamp is None else tip - stamp
+    return lags
+
+
 def report(intervals, lock_seconds):
     """What the intervals say about a payment broadcast at a random moment."""
     if not intervals:
@@ -126,6 +160,28 @@ def main(argv=None):
         print(f"lockcheck: {arguments.api}")
         intervals = recent_intervals(arguments.api, arguments.blocks)
     share = report(intervals, arguments.lock)
+
+    if arguments.rpc:
+        lags = finality_lag(RPC_ENDPOINTS[arguments.rpc])
+        print()
+        print("  but the interval is not this rail's gate — see DECISIONS.md D15:")
+        print(f"    3 confirmations (what runs today)  ~{3 * 12 / 60:.1f} min"
+              "  — fits the lock, and a reorg can unbook it")
+        for tag in ("safe", "finalized"):
+            lag = lags.get(tag)
+            if lag is None:
+                print(f"    {tag:<34} unavailable from this endpoint")
+                continue
+            verdict = "fits" if lag <= arguments.lock else "DOES NOT FIT"
+            print(f"    {tag:<34} {lag / 60:5.1f} min  — {verdict}")
+        finalized = lags.get("finalized")
+        if finalized is not None and finalized > arguments.lock:
+            print()
+            print(f"FAIL: a settlement that cannot be unbooked needs"
+                  f" {finalized / 60:.1f} min and the lock is"
+                  f" {arguments.lock / 60:.0f}.")
+            return 1
+
     if share > arguments.max_share:
         print(f"\nFAIL: {share:.0f}% is above the {arguments.max_share:.0f}% this"
               " tool is willing to call acceptable.")
