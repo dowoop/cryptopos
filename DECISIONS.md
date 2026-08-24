@@ -1036,3 +1036,67 @@ maturity deadline are different — stands. The change it proposed does not.
 is the state machine's explicit representation of *uncertainty*. The clock
 decides when automation stops; it does not fabricate a conclusion. That is a
 defensible design and I mistook it for a defect twice.
+
+## D18 · Amoy is both fast and safe, and D15's central claim was wrong — 2026-08-24
+
+D15 concluded, and D16 and GOAL.md repeated: *"every rail is either fast and
+unsafe, or safe and too slow."* **That is false, and the counterexample was
+already seeded, enabled and running on this instance.**
+
+**Measured on `polygon:amoy`, 2026-08-24**, sampling `latest` against
+`finalized` eight times over forty seconds:
+
+| | |
+|---|---|
+| lag, `latest` − `finalized` | **0–2 blocks** |
+| in seconds | **0–2 s** |
+| `finalized` advanced over the sample | 38 blocks, 8 distinct heights |
+| against a 15-minute rate lock | **fits, with 14m58s to spare** |
+
+It is not pinned and not aliased to `latest` — it advances continuously, which
+was checked precisely because a 0-second lag is what a dishonest endpoint would
+also report.
+
+**This is milestone finality, not checkpoint finality.** I assumed Polygon's
+finality meant Heimdall checkpoints to Ethereum, which take tens of minutes.
+Polygon's milestones are the fast path, and they settle in about two seconds.
+Assuming the slow mechanism is why this rail was dismissed in D14 and D15
+without ever being measured.
+
+**And the adapter already gates on it.** Reproduced in `evm.py`:
+`PolygonAmoyUsdcRail._finalized_tip` calls
+`eth_getBlockByNumber("finalized", False)`, and `_is_mature` requires
+`observations.finalized_tip`. Its docstring has said so all along — *"settled
+only once Heimdall reports the block finalized."*
+
+### What this does to the whole D11–D17 sequence
+
+**The timing problem is already solved, on a rail that is switched on.**
+
+- `bitcoin:testnet4` — 1 confirmation, median block **20.0 min**. Too slow
+  (D11), and unrecoverable (D12–D14).
+- `ethereum:sepolia` — 3 confirmations, ~36 s, **reorg can permanently
+  false-book**; finality is **17–19 min**, past the lock (D15).
+- **`polygon:amoy` — finalized in ~2 s. Fast, irreversible, and inside the
+  lock.** No stranding, no reorg window, no change to `RATE_LOCK_SECONDS`, and
+  none of D12/D13/D14's option problems arise because nothing waits.
+
+So the liveness trilemma never applied to this rail. It is a property of slow
+chains and of settling on confirmation counts, not of the terminal.
+
+**What remains on Amoy is D5, and only D5:** it receives at a static address
+shared with the two Sepolia rails (`rails_probe` reports it). That is the
+bounded problem — per-sale addresses or a payment binding — and D9's gas
+objection is the thing to answer, not a timing impossibility.
+
+### Correction to D14, D15, D16 and GOAL.md
+
+Every one of them says or implies that no rail is both fast enough and safe
+enough. **Read them with this entry beside them.** D15's measurement of Sepolia
+stands; its generalisation to "every rail" did not survive being checked, and it
+was never checked because the rail that disproves it was assumed rather than
+measured.
+
+The lesson is the one this register keeps relearning: **a claim about "every X"
+earns its quantifier by measurement.** Two of the four rails here were measured
+and two were assumed, and the conclusion was drawn from all four.
