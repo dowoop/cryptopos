@@ -13,6 +13,11 @@ noticed if testnet4's timing changes.
     python3 tools/lockcheck.py                 # testnet4, against 15 minutes
     python3 tools/lockcheck.py --lock 3600     # what an hour would buy
     python3 tools/lockcheck.py --blocks 50     # a longer sample
+    python3 tools/lockcheck.py --rpc sepolia   # the EVM side, for comparison
+
+The comparison is the point. D14 concluded that the only route to an unattended
+demo is a fast chain, and that conclusion rests on Sepolia's interval being as
+short as Bitcoin's is long. Both halves are measured here or neither is.
 
 Read-only, one HTTP GET, no bench and no container.
 """
@@ -25,6 +30,13 @@ import urllib.request
 
 
 DEFAULT_API = "https://mempool.space/testnet4/api"
+
+# The endpoints install.py seeds, so the tool measures what the terminal
+# actually talks to rather than a nearby chain that happens to be easier.
+RPC_ENDPOINTS = {
+    "sepolia": "https://ethereum-sepolia-rpc.publicnode.com",
+    "amoy": "https://polygon-amoy-bor-rpc.publicnode.com",
+}
 
 # charge.py's RATE_LOCK_SECONDS. Named here rather than imported because this
 # tool must run without a bench, and a wrong copy is caught by the fact that
@@ -40,6 +52,27 @@ def recent_intervals(api, count):
         blocks = json.load(response)
     stamps = sorted((block["timestamp"] for block in blocks), reverse=True)
     stamps = stamps[: count + 1]
+    intervals = [stamps[i] - stamps[i + 1] for i in range(len(stamps) - 1)]
+    return [interval for interval in intervals if interval >= 0]
+
+
+def rpc_intervals(url, count):
+    """The same measurement over JSON-RPC, for the EVM rails."""
+    headers = {"Content-Type": "application/json",
+               "User-Agent": "cryptopos-lockcheck/1.0"}
+
+    def call(method, params):
+        body = json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+        request = urllib.request.Request(url, data=body, headers=headers)
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)["result"]
+
+    tip = int(call("eth_blockNumber", []), 16)
+    stamps = [
+        int(call("eth_getBlockByNumber", [hex(number), False])["timestamp"], 16)
+        for number in range(tip, tip - count - 1, -1)
+    ]
     intervals = [stamps[i] - stamps[i + 1] for i in range(len(stamps) - 1)]
     return [interval for interval in intervals if interval >= 0]
 
@@ -75,6 +108,8 @@ def report(intervals, lock_seconds):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--api", default=DEFAULT_API)
+    parser.add_argument("--rpc", choices=sorted(RPC_ENDPOINTS),
+                        help="measure an EVM rail over JSON-RPC instead")
     parser.add_argument("--lock", type=int, default=RATE_LOCK_SECONDS,
                         help="the acceptance window in seconds")
     parser.add_argument("--blocks", type=int, default=15,
@@ -83,8 +118,14 @@ def main(argv=None):
                         help="fail above this percentage of stranded payments")
     arguments = parser.parse_args(argv)
 
-    print(f"lockcheck: {arguments.api}")
-    share = report(recent_intervals(arguments.api, arguments.blocks), arguments.lock)
+    if arguments.rpc:
+        url = RPC_ENDPOINTS[arguments.rpc]
+        print(f"lockcheck: {arguments.rpc} — {url}")
+        intervals = rpc_intervals(url, arguments.blocks)
+    else:
+        print(f"lockcheck: {arguments.api}")
+        intervals = recent_intervals(arguments.api, arguments.blocks)
+    share = report(intervals, arguments.lock)
     if share > arguments.max_share:
         print(f"\nFAIL: {share:.0f}% is above the {arguments.max_share:.0f}% this"
               " tool is willing to call acceptable.")
