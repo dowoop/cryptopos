@@ -12,6 +12,7 @@ broke rather than which line threw.
 """
 
 import json
+import time
 import urllib.request
 
 import frappe
@@ -397,6 +398,32 @@ def _run_checks():
 	before = sale.state
 	watch_module.poll(sale.name)
 	sale.reload()
+
+	# The check that was missing, and whose absence let a nine-hour error hide
+	# behind seventy-six green ones. See DECISIONS.md D19.
+	#
+	# Every fixture in this file that exercises settlement points at payments
+	# that are genuinely DAYS old, and a days-old block time compares fine
+	# against an expiry that is nine hours in the past. So the suites proved the
+	# parts and never the whole: no live sale could settle, and nothing said so.
+	#
+	# The intent's clock is the thing to check, because both adapters credit a
+	# transfer only when `block_time_epoch <= expires_at_epoch`. If that epoch
+	# does not agree with the real one, every payment made NOW is "after
+	# expiry", on every rail.
+	intent_now = sale.extras()["intent"]["created_at_epoch"]
+	real_now = int(time.time())
+	check(
+		"a charge stamps the intent with the real epoch, not a mistimed one",
+		abs(real_now - intent_now) <= 120,
+		f"intent says {intent_now}, the clock says {real_now}"
+		f" ({(real_now - intent_now) / 3600:+.2f} h apart)",
+	)
+	check(
+		"and its expiry is a rate lock into the future, not the past",
+		0 < sale.extras()["intent"]["expires_at_epoch"] - real_now <= charge_module.RATE_LOCK_SECONDS,
+		f"expires in {sale.extras()['intent']['expires_at_epoch'] - real_now} s",
+	)
 
 	check(
 		"a real endpoint answering stamps provenance REAL",
