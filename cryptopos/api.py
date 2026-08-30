@@ -7,6 +7,7 @@ from frappe import _
 
 from cryptopos import charge as charge_module
 from cryptopos import watch as watch_module
+from cryptopos_core.plugin import UNCONDITIONAL_PER_SALE
 
 
 @frappe.whitelist()
@@ -231,8 +232,9 @@ def rails(with_readiness=0):
 	)
 	for row in rows:
 		derives = bool((row.pop("testnet_xpub", "") or "").strip())
-		row["binding"] = "per-sale" if derives else "shared"
 		rail = frappe.get_doc("Crypto Rail", row["name"])
+		declared = catalog.declared_binding_category(catalog.plugin_for(rail))
+		row["binding"] = "per-sale" if declared == UNCONDITIONAL_PER_SALE or derives else "shared"
 		row["gap_run"] = catalog.gap_run_for(rail) if derives else 0
 		row["gap_limit"] = catalog.GAP_LIMIT
 		if with_readiness:

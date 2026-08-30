@@ -23,6 +23,25 @@ The invoiced amount is computed ONCE at display precision, then scaled to
 native, so small amounts do not round to zero. That one native integer is
 the single source of truth for the URI, the screen and the watcher.
 
+``binding_category`` answers a narrower question than the neighboring prose:
+does the rail bind money to one sale even when the host derives no address?
+``unconditional-per-sale`` says yes; ``not-unconditional`` says no. A host can
+strengthen the latter by deriving a fresh receiving address, but cannot infer
+the former merely by looking for an xpub in its own configuration.
+
+**It is a claim about an ADAPTER, not about a chain.** D33 is why: Solana Pay's
+reference was a sound protocol mechanism the whole time, and the rail still
+credited the wrong sale until the adapter decoded the transfer instruction
+rather than a balance delta. A chain that *could* support a per-sale binding
+has not made one. Two things must be true and both live in code: the rail gives
+each sale an identity of its own (`catalog.REFERENCE_RAILS`, or a host-derived
+address), and its observer attributes the amount to the thing carrying that
+identity. A rail with no observer has neither, so it declares
+``not-unconditional`` — and that matters because
+`cryptopos.catalog.declared_binding_category` lends a built-in declaration to
+any installed plugin that declares none, and `api.rails`, `tools/rails_probe`
+and `tools/snapshot` all turn it into an operator-facing "per-sale".
+
 **What is deliberately NOT here.** Which endpoint an operator configured, and
 whether a rail is switched on. Those are host questions -- they change per
 deployment, they are edited by someone with a login, and a library that owned
@@ -49,6 +68,7 @@ from types import MappingProxyType
 
 from .errors import InvalidAmount, InvalidRate, _coerce_integer
 from .modes import MAINNET, require_mode
+from .plugin import NOT_UNCONDITIONAL, UNCONDITIONAL_PER_SALE
 from .rates import MICROCENTS_PER_USD
 
 # ERC-20 USDC contract addresses (mainnet).
@@ -85,6 +105,7 @@ RAILS = {
 		"testnet_gate_confs": 1,          # vault Bitcoin note: 3 mainnet / 1 testnet
 		"gate_text": "confs >= 3 (mainnet; testnet settles at 1)",
 		"binding": "fresh HD address per sale (from merchant xpub, BTCPay pattern)",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "partial",
 		"maturity_note": "real testnet4 reads + fresh HD addresses;"
 							" no in-app payer - the faucet plays the customer",
@@ -121,6 +142,7 @@ RAILS = {
 		"gate_confs": 3,
 		"gate_text": "EIP-658 status == 0x1 AND confs >= 3",
 		"binding": "static address + exact-amount match in the lock window (weakest)",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "works",
 		"maturity_note": "real Sepolia reads + real payer"
 							" (bundled wallet signs & broadcasts)",
@@ -143,6 +165,7 @@ RAILS = {
 		"gate_confs": 3,
 		"gate_text": "EIP-658 status == 0x1 AND confs >= 3",
 		"binding": "static address + exact-amount match (token watcher reads Transfer logs)",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "works",
 		"maturity_note": "real Sepolia reads + real payer"
 							" (bundled wallet signs & broadcasts)",
@@ -165,6 +188,7 @@ RAILS = {
 		"gate_confs": None,               # Polygon does NOT count confs:
 		"gate_text": "tx block <= the 'finalized' block tag (Heimdall v2 - supersedes conf counting)",
 		"binding": "static address + exact-amount match in the lock window",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "works",
 		"maturity_note": "real Amoy reads + real payer"
 							" (bundled wallet signs & broadcasts)",
@@ -191,6 +215,7 @@ RAILS = {
 		"gate_confs": None,
 		"gate_text": "tx block <= 'finalized' tag (never conf counting on Polygon)",
 		"binding": "static address + exact-amount match (Transfer logs)",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "works",
 		"maturity_note": "real Amoy reads + real payer"
 							" (bundled wallet signs & broadcasts)",
@@ -213,6 +238,7 @@ RAILS = {
 		"gate_confs": None,
 		"gate_text": "commitment == 'finalized' (processed books NOTHING, confirmed is display-only)",
 		"binding": "static address + fresh 32-byte reference key per sale (Solana Pay)",
+		"binding_category": UNCONDITIONAL_PER_SALE,
 		"maturity": "works",
 		"maturity_note": "real devnet reads + real payer"
 							" (bundled wallet signs & broadcasts)",
@@ -232,6 +258,17 @@ RAILS = {
 		"gate_confs": None,
 		"gate_text": "commitment == 'finalized'",
 		"binding": "static address + fresh reference key; amount read from token balance deltas",
+		# NOT unconditional, and the neighbouring prose is why. D33 established
+		# that crediting a recipient's balance delta because a reference appears
+		# in the account list is "a race deciding which sale steals the money,
+		# not attribution" -- one transfer naming two references settled two
+		# sales. `sol` earned its claim by decoding the transfer instruction;
+		# this rail has no adapter at all, so the reference is an intention and
+		# the amount still comes from a delta. Claiming per-sale here would tell
+		# an operator a payment is bound when the described mechanism cannot
+		# bind it, and `declared_binding_category` hands this value to any
+		# future plugin that does not declare its own.
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "works",
 		"maturity_note": "real devnet reads + real payer"
 							" (bundled wallet signs & broadcasts)",
@@ -253,6 +290,14 @@ RAILS = {
 		"gate_confs": 10,
 		"gate_text": "locked == false AND confs >= 10 AND !double_spend_seen (the locked FLAG rules, not the count)",
 		"binding": "fresh subaddress per sale (view-only wallet-rpc create_address)",
+		# Monero's mechanism is sound -- wallet-rpc reports an incoming
+		# transfer's amount with its `subaddr_index`, which is attribution and
+		# not a balance delta. But "fresh" is adapter behaviour, and there is no
+		# adapter: `uri.py` emits the recipient the operator configured, and
+		# nothing in this package can create a subaddress. Two sales would be
+		# shown one address. The claim becomes true in the plugin that allocates
+		# per sale, declared there where the code that makes it true lives.
+		"binding_category": NOT_UNCONDITIONAL,
 		# THE ONE RAIL WHOSE MATURITY IS NOT A CONSTANT. Every other rail
 		# either has a public endpoint or does not, and the answer is the
 		# same on every terminal. Monero cannot be watched from a public
@@ -289,6 +334,12 @@ RAILS = {
 		"gate_confs": None,
 		"gate_text": "status MINED_CONFIRMED AND INBOUND AND !cancelled (status-keyed; no conf count on the wire)",
 		"binding": "payment_id embedded in the TariAddress (RFC-0155)",
+		# A payment_id binds money to the id; it does not bind the id to a sale.
+		# It is optional, arbitrary and not required to be unique, and this
+		# package never allocates one: `uri.py` passes the configured
+		# TariAddress through unchanged, so every sale would carry the same id
+		# and the winner would be decided by polling order. Same shape as D33.
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "sim-always",
 		# PARKED, explicitly, by A2 (decided 2026-07-25) - not "not yet
 		# reached". Three independent blockers, any one of which is enough:
@@ -377,6 +428,7 @@ RAILS = {
 					" (the eth pattern; the weakest - a payment component"
 					" taking a sale_ref would bind exactly and is a new"
 					" contract)",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "partial",
 		"maturity_note": "real esmeralda reads over the same HTTPS+JSON"
 							" indexer the policy layer already uses; no in-app"
@@ -436,6 +488,7 @@ RAILS = {
 						" build cannot use it; txlock/islock is display-only and"
 						" never books)",
 		"binding": "fresh HD address per sale (same pattern as Bitcoin)",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "partial",
 		"maturity_note": "real testnet reads via Insight REST + fresh HD"
 							" addresses; no in-app payer - the faucet plays the"
@@ -467,6 +520,7 @@ RAILS = {
 		"gate_text": "confs >= 10 (plain PoW count; no status flag or lock)",
 		"binding": "fresh transparent address per sale (the address is the binding; ZIP-321 forbids"
 					" a memo on a transparent recipient)",
+		"binding_category": NOT_UNCONDITIONAL,
 		"maturity": "sim-always",
 		# ZEC WAS SUPPOSED TO BE PROMOTED ALONGSIDE DASH, AND THE
 		# MEASUREMENT REFUTED IT (2026-07-27). Recording that here, next to

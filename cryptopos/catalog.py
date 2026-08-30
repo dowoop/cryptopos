@@ -25,7 +25,7 @@ from frappe import _
 
 from cryptopos_core import catalog as _core
 from cryptopos_core import hd
-from cryptopos_core.errors import CryptoPosError
+from cryptopos_core.errors import CryptoPosError, InvalidRailPlugin
 from cryptopos_core.plugin import (
 	ADDRESS_VALIDATION,
 	OBSERVATION,
@@ -33,6 +33,7 @@ from cryptopos_core.plugin import (
 	SETTLEMENT,
 	PaymentIntent,
 	RecipientBaseline,
+	binding_category_for,
 )
 
 # What a rail must prove it can do before a sale may be charged on it. All
@@ -49,9 +50,219 @@ CAPABILITY_WORDS = {
 }
 
 
+# What a rail adapter has to be before this deployment will drive one. Checked
+# on anything arriving from outside the package, because an entry point is a
+# string in somebody else's metadata: `pip install` is enough to put a name in
+# this table, and a wheel exporting a module, a dict or a half-written class
+# must be refused as a bad plugin rather than discovered as a broken rail.
+_RAIL_SHAPE = ("key", "capabilities", "validate_recipient", "readiness",
+               "capture_baseline", "create_request", "observe", "settle")
+
+# Discovery is done once per process and kept. Frappe runs several -- web,
+# scheduler, two queues -- and each one discovers on its own first use, which
+# is why installing a wheel needs those processes restarted before the rail is
+# visible everywhere. A hot install otherwise leaves workers disagreeing about
+# what exists, and a rail that half the deployment can see is worse than one
+# nobody can.
+_DISCOVERED = None
+_REFUSED = {}
+_IDENTITY = {}
+_DESCRIBED = {}
+
+
+def _entry_point_rails():
+	"""Rails advertised by installed distributions, and why any were refused.
+
+	The entry point group is `cryptopos.rails`, which `cryptopos-core` already
+	declares in its own `pyproject.toml` for four of its builtins. Those
+	resolve to the identical objects `builtin_rails()` returns, so they are
+	idempotent rather than duplicates -- identity is checked, not the name.
+	"""
+	from importlib import metadata
+
+	# Keyed by ORIGIN, never by `point.name`. Two distributions may advertise
+	# the same entry-point name -- nothing stops them, the name is theirs to
+	# choose -- and a dict keyed on the name loses one of them silently,
+	# BEFORE the collision check below ever sees it. The survivor would then be
+	# whichever distribution metadata iteration happened to reach last.
+	# Reproduced 2026-08-25 against this function's first draft.
+	found, refused = [], {}
+	for point in metadata.entry_points(group="cryptopos.rails"):
+		distribution = getattr(point, "dist", None)
+		origin = (f"{getattr(distribution, 'name', '?')} "
+		          f"{getattr(distribution, 'version', '?')} [{point.name}]")
+		try:
+			adapter = point.load()
+		except Exception as exception:
+			# A broken wheel must not take the terminal down on import. It is
+			# recorded instead, and `plugin_for` says so if a row names it --
+			# because "no installed adapter provides that key" would send an
+			# operator to install something that is already installed.
+			refused[origin] = f"{type(exception).__name__}: {exception}"
+			continue
+		missing = [name for name in _RAIL_SHAPE if not hasattr(adapter, name)]
+		if missing:
+			refused[origin] = (
+				f"does not look like a rail adapter: no {', '.join(missing)}")
+			continue
+		try:
+			binding_category_for(adapter)
+		except InvalidRailPlugin as exception:
+			refused[origin] = exception.reason
+			continue
+		found.append((origin, adapter))
+	return found, refused
+
+
 def plugins():
-	"""Every built-in rail adapter, by its catalog key."""
-	return {rail.key: rail for rail in _core.builtin_rails()}
+	"""Every rail adapter this deployment can drive, by its catalog key.
+
+	The built-ins, plus anything installed into this environment that
+	advertises a `cryptopos.rails` entry point. That second half is what lets
+	an operator add an asset by installing a wheel and creating a row, instead
+	of editing this app -- the difference between a terminal that supports five
+	rails and one that supports the rail its operator needs.
+
+	**A duplicate key is refused, never resolved.** `network.key/asset.key`
+	names the concrete money: one chain, one asset, one contract. Two adapters
+	claiming it are not two assets, so there is no correct winner to pick.
+	Letting the external one win makes the terminal's behaviour depend on
+	install order; letting the built-in win silently defeats the install the
+	operator performed on purpose. Both are worse than saying so.
+	"""
+	global _DISCOVERED, _REFUSED, _IDENTITY, _DESCRIBED
+	if _DISCOVERED is not None:
+		return dict(_DISCOVERED)
+
+	# A BUILT-IN THAT CANNOT DO THE JOB DOES NOT HOLD THE KEY.
+	#
+	# Six of the twelve built-ins are `RequestRail` placeholders or partial
+	# readers: they build a QR, or read a balance, and cannot prove a payment
+	# arrived. `require_chargeable()` refuses every one of them, so none can
+	# ever carry a sale -- and while they sat in this registry they owned the
+	# NAME OF THE MONEY, which meant a plugin that can settle that money was
+	# permanently locked out by a stub admitting it cannot.
+	#
+	# Decided here, in the host, at discovery: a placeholder is never an
+	# adapter, in every process, always. That is what makes it different from
+	# the runtime override rejected in D30 -- there is no install order to
+	# depend on, and no window in which two processes disagree about which
+	# implementation a key resolves to.
+	#
+	# They are not discarded. `described_rails()` keeps them with the blocker
+	# each states about itself, so a rail this deployment cannot drive is still
+	# one it can describe -- and `plugin_for` says which of the two an operator
+	# is looking at.
+	described, registry = {}, {}
+	for rail in _core.builtin_rails():
+		if CHARGE_CAPABILITIES <= rail.capabilities:
+			registry[rail.key] = rail
+		else:
+			described[rail.key] = rail
+
+	identity = dict.fromkeys(registry, "builtin")
+	external, refused = _entry_point_rails()
+
+	for origin, adapter in external:
+		key = getattr(adapter, "key", "")
+		existing = registry.get(key)
+		if existing is adapter:
+			continue                              # a builtin, advertising itself
+		if existing is not None:
+			refused[origin] = (
+				f"claims {key}, which is already provided by "
+				f"{identity.get(key, 'another adapter')}. That key names one "
+				f"asset on one chain, so there is no second one for a second "
+				f"adapter to be.")
+			continue
+		# THE SAME BAR THE BUILT-INS ARE HELD TO, and it has to be the same one.
+		# A built-in that cannot observe or settle is filed as described rather
+		# than driveable, a few lines above. An external arriving with the same
+		# gap was being registered as an adapter anyway -- where it would
+		# DISPLACE the described entry, so the operator lost the blocker
+		# explaining why that money cannot be taken, and gained a rail that
+		# `require_chargeable` refuses for reasons it no longer states.
+		# Nothing was ever at risk of being mis-settled; the honest message was.
+		missing = sorted(CHARGE_CAPABILITIES - set(getattr(adapter, "capabilities", ())))
+		if missing:
+			refused[origin] = (
+				f"claims {key} without being able to "
+				f"{', '.join(CAPABILITY_WORDS.get(c, c) for c in missing)}. A rail "
+				f"that cannot do all four cannot carry a sale, and taking the key "
+				f"would only hide whatever already explains why.")
+			continue
+		registry[key] = adapter
+		identity[key] = origin
+
+	# A plugin claiming a described key is not a collision -- nothing was
+	# driving it. It stops being merely described the moment something can.
+	for key in registry:
+		described.pop(key, None)
+
+	_DISCOVERED, _REFUSED, _IDENTITY, _DESCRIBED = registry, refused, identity, described
+	return dict(registry)
+
+
+def declared_binding_category(adapter):
+	"""Resolve a declaration without making pre-category plugins disappear.
+
+	An explicit plugin value is authoritative. For an older plugin with no such
+	field, a matching built-in concrete rail supplies the library declaration;
+	otherwise the protocol helper's pessimistic ``not-unconditional`` default
+	stands. Matching uses the concrete catalog key, never an editable row name.
+	"""
+	plugin_category = binding_category_for(adapter)
+	if hasattr(adapter, "binding_category"):
+		return plugin_category
+	for known in _core.builtin_rails():
+		if known.key == adapter.key:
+			return binding_category_for(known)
+	return plugin_category
+
+
+def described_rails():
+	"""Rails this deployment knows about and cannot drive, with the reason.
+
+	Each states its own blocker. A rail that can build a payment request and
+	cannot prove receipt is request-ready, not charge-ready, and charging on it
+	would take money the terminal could never confirm arrived.
+	"""
+	plugins()
+	return dict(_DESCRIBED)
+
+
+def adapter_identity(key):
+	"""Which implementation currently provides `key`, as a stable string.
+
+	`catalog_key` names the MONEY -- one chain, one asset, one contract. It
+	does not name the code that moves it, and those are not the same fact.
+	Install adapter A, charge a sale under it, replace it with adapter B under
+	the same key, and B will happily reinterpret A's persisted baseline and
+	settle a payment A would have refused: nothing in the sale record said
+	which implementation created it. So charge() stamps this, and watch()
+	refuses an in-flight sale whose implementation changed underneath it.
+
+	Found by Codex arguing against a proposal on 2026-08-25 and reproduced
+	here; see DECISIONS.md D30.
+	"""
+	plugins()
+	return _IDENTITY.get(key, "unknown")
+
+
+def refused_plugins():
+	"""Entry points that advertised a rail and did not become one.
+
+	Read by `tools/rails_probe.py`. A refusal nobody can see is a rail an
+	operator installed, cannot find, and has no way to ask about.
+	"""
+	plugins()
+	return dict(_REFUSED)
+
+
+def _forget_plugins():
+	"""Drop the process cache. For tests and for a harness that installs one."""
+	global _DISCOVERED, _REFUSED, _IDENTITY, _DESCRIBED
+	_DISCOVERED, _REFUSED, _IDENTITY, _DESCRIBED = None, {}, {}, {}
 
 
 def plugin_for(rail):
@@ -68,6 +279,32 @@ def plugin_for(rail):
 		)
 	adapter = plugins().get(key)
 	if adapter is None:
+		known = described_rails().get(key)
+		if known is not None:
+			frappe.throw(
+				_(
+					"Rail {0} names {1}, which this deployment knows about and "
+					"cannot drive: {2}. It can be described and it cannot be "
+					"charged. Installing a plugin that provides {1} is what "
+					"would make it driveable."
+				).format(
+					rail.name, key,
+					getattr(known, "blocker", "") or "it cannot prove a payment arrived",
+				),
+				title=_("Rail known, not driveable"),
+			)
+		refused = refused_plugins()
+		if refused:
+			frappe.throw(
+				_(
+					"Rail {0} names catalog key {1}, which no installed adapter "
+					"provides. {2} installed entry point(s) advertised a rail and "
+					"were refused: {3}. That is a different problem from nothing "
+					"being installed, and it is fixed differently."
+				).format(rail.name, key, len(refused),
+				         "; ".join(f"{n}: {why}" for n, why in sorted(refused.items()))),
+				title=_("Unknown adapter"),
+			)
 		frappe.throw(
 			_("Rail {0} names catalog key {1}, which no installed adapter provides.").format(
 				rail.name, key
@@ -104,9 +341,23 @@ def configuration_for(rail, mode):
 FRESH_RECIPIENT_FAMILIES = frozenset({"bitcoin"})
 
 # Families for which this terminal can build an address from a derived key.
-# Only BIP-84 P2WPKH exists. See DECISIONS.md D9 for why EVM derivation was
-# proposed and rejected.
-DERIVING_FAMILIES = frozenset({"bitcoin"})
+# Version bytes are part of the choice: Bitcoin testnet accepts only its
+# tpub/vpub serialisations, while EVM wallets conventionally export BIP-32
+# xpub bytes even for testnets.
+def _bitcoin_testnet_address(key):
+	if key.version not in (0x043587CF, 0x045F1CF6):
+		raise hd.InvalidExtendedKey(
+			"Bitcoin testnet address derivation requires tpub or vpub version bytes"
+		)
+	return hd.p2wpkh_address(key, "tb")
+
+
+_ADDRESS_BUILDERS = {
+	"bitcoin": _bitcoin_testnet_address,
+	"evm-native": hd.evm_address,
+	"evm-erc20": hd.evm_address,
+}
+DERIVING_FAMILIES = frozenset(_ADDRESS_BUILDERS)
 
 
 def requires_fresh_recipient(rail):
@@ -162,7 +413,7 @@ def recipient_for(rail, mode):
 			try:
 				account = hd.parse_extended_key(locked_xpub)
 				child = hd.derive_path(account, f"0/{index}")
-				address = hd.p2wpkh_address(child, "tb")
+				address = _ADDRESS_BUILDERS[rail.family](child)
 			except hd.InvalidExtendedKey as exception:
 				frappe.throw(str(exception), title=_("Receiving key refused"))
 			frappe.db.set_value(

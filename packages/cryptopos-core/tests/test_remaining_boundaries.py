@@ -34,6 +34,7 @@ class RequestRailBoundaries(unittest.TestCase):
 			"fixture",
 			Network("fixture", "testnet", True),
 			Asset("native", "coin", "COIN", 6),
+			binding_category="not-unconditional",
 			request_ready=True,
 			address_validation_ready=False,
 			blocker="validation unavailable",
@@ -45,6 +46,15 @@ class RequestRailBoundaries(unittest.TestCase):
 		with self.assertRaises(AddressRefused):
 			self.rail.create_request(self.intent)
 
+	def test_request_rail_keeps_the_pre_category_constructor_compatible(self):
+		legacy = RequestRail(
+			"fixture",
+			Network("fixture", "testnet", True),
+			Asset("native", "coin", "COIN", 6),
+			blocker="fixture",
+		)
+		self.assertEqual(legacy.binding_category, "not-unconditional")
+
 	def test_request_only_rails_refuse_baseline_observation_and_settlement(self):
 		for operation in (
 			lambda: self.rail.capture_baseline("recipient", {}),
@@ -54,13 +64,20 @@ class RequestRailBoundaries(unittest.TestCase):
 			with self.subTest(operation=operation), self.assertRaises(UnsupportedCapability):
 				operation()
 
-	def test_request_rail_rejects_foreign_intents(self):
-		with self.assertRaises(InvalidRailPlugin):
-			polygon_amoy.create_request(object())
+	def test_a_rail_rejects_an_intent_that_is_not_one(self):
+		# This asserted only `polygon_amoy` until 2026-08-24, when that rail
+		# stopped being request-only -- and the assertion kept passing while
+		# `RequestRail._intent` stopped being executed by anything, because the
+		# full rail rejects foreign intents through its own code path. Both are
+		# named here so neither can go dark again without a test going red.
+		for rail in (self.rail, polygon_amoy):
+			with self.subTest(rail=rail.key), self.assertRaises(InvalidRailPlugin):
+				rail.create_request(object())
 
 
 class ConformanceBoundaries(unittest.TestCase):
 	class Plugin:
+		binding_category = "not-unconditional"
 		network = Network("fixture", "testnet", True)
 		asset = Asset("native", "coin", "COIN", 6)
 		key = f"{network.key}/{asset.key}"

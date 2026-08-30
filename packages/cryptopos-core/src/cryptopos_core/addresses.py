@@ -377,14 +377,14 @@ def _check_evm(address):
 			"EIP-55 checksum and a typo in it cannot be detected"
 		)
 
-	digest = keccak256(body.lower().encode("ascii")).hex()
-	for character, hash_character in zip(body, digest):
-		if character.isalpha():
-			expected_upper = int(hash_character, 16) >= 8
-			if character.isupper() != expected_upper:
-				return REFUSED, ("the EIP-55 checksum does not verify -- this address is mistyped")
+	# Formatting owns the casing rule. Comparing with its canonical result
+	# keeps validation and every producer on one implementation of EIP-55.
+	if body != to_eip55(body)[2:]:
+		return REFUSED, ("the EIP-55 checksum does not verify -- this address is mistyped")
 	return OK, ""
 
+# `to_eip55` is defined below with the other public entry points; Python
+# resolves that name when validation runs, after module initialisation.
 
 def _check_solana(address):
 	raw = _b58_decode(address)

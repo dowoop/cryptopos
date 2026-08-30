@@ -1,4 +1,4 @@
-"""Watch-only BIP-32 public derivation and BIP-84 receiving addresses.
+"""Watch-only BIP-32 public derivation and Bitcoin/EVM receiving addresses.
 
 This module accepts only extended public keys. It has no private-key
 derivation and no signing operation: the terminal can calculate where money
@@ -8,6 +8,8 @@ should arrive, but nothing in this module can spend it.
 import hashlib
 from dataclasses import dataclass
 
+from ._keccak import keccak256
+from .addresses import to_eip55
 from .errors import CryptoPosError
 
 _B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -15,6 +17,7 @@ _B58_INDEX = {character: value for value, character in enumerate(_B58_ALPHABET)}
 
 _PUBLIC_VERSIONS = frozenset((0x0488B21E, 0x043587CF, 0x04B24746, 0x045F1CF6))
 _PRIVATE_VERSIONS = frozenset((0x0488ADE4, 0x04358394, 0x04B2430C, 0x045F18BC))
+_EVM_PUBLIC_VERSION = 0x0488B21E
 
 _FIELD_PRIME = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
 _SQRT_EXPONENT = 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF0C
@@ -257,3 +260,17 @@ def p2wpkh_address(key: ExtendedKey, hrp: str) -> str:
 	_point_from_public_key(key.public_key)
 	program = _hash160(key.public_key)
 	return _bech32_encode(hrp, [0, *_convert_bits(program, 8, 5)])
+
+
+def evm_address(key: ExtendedKey) -> str:
+	"""Encode an xpub child as its EIP-55 checksummed EVM address."""
+	if not isinstance(key, ExtendedKey):
+		raise InvalidExtendedKey("address derivation requires an ExtendedKey")
+	if key.version != _EVM_PUBLIC_VERSION:
+		raise InvalidExtendedKey(
+			"EVM address derivation requires xpub version bytes; "
+			"Bitcoin tpub, zpub, and vpub keys are refused"
+		)
+	x, y = _point_from_public_key(key.public_key)
+	public_point = x.to_bytes(32, "big") + y.to_bytes(32, "big")
+	return to_eip55(keccak256(public_point)[-20:].hex())

@@ -24,6 +24,7 @@ from .plugin import (
 	Readiness,
 	RecipientBaseline,
 )
+from .rails import RAILS
 
 OOTLE_XTR_RESOURCE = "resource_" + "01" * 32
 _ACCOUNT = re.compile(r"^(?:account|component)_[0-9a-f]{32,64}$")
@@ -35,6 +36,7 @@ class OotleEsmeralda:
 	network = Network("ootle", "esmeralda", True)
 	asset = Asset("native", "xtr", "EsmeraldaXTR", 6)
 	key = f"{network.key}/{asset.key}"
+	binding_category = RAILS["xtr"]["binding_category"]
 	capabilities = frozenset({ADDRESS_VALIDATION, OBSERVATION})
 
 	def validate_recipient(self, recipient):

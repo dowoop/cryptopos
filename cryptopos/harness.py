@@ -26,7 +26,9 @@ from cryptopos import settle as settle_module
 from cryptopos import watch as watch_module
 from cryptopos.cryptopos.doctype.crypto_sale.crypto_sale import IllegalTransition
 from cryptopos.cryptopos.report.crypto_takings import crypto_takings as takings_report
+from cryptopos_core import addresses as core_addresses
 from cryptopos_core import hd
+from cryptopos_core.plugin import NOT_UNCONDITIONAL, binding_category_for
 
 # The rail this harness charges on. Ethereum Sepolia, because it is one of
 # the rails this terminal actually offers -- `btc` is seeded switched off,
@@ -48,6 +50,12 @@ BIP84_ACCOUNT_ZPUB = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3
 # version changed from zpub to vpub and its Base58Check checksum recomputed.
 # No child key was generated to make the expected answers agree with the code.
 BIP84_ACCOUNT_VPUB = "vpub5YvMuJNjRSYon44z9QmCfdf8SqJRVNvz6m55Qy5iVjZQxDfUgtiQjnc7CC1fAbED2tAGCZRERUfvtn2DstZGU6HMns6dXXH2wujSc2wfi2x"
+
+# BIP-32 test vector 1's published depth-three xpub at m/0'/1/2'. It is
+# public derivation material only; this harness uses it to exercise EVM address
+# allocation and never offers the resulting addresses in a sale.
+# https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki#test-vectors
+BIP32_DEPTH_THREE_XPUB = "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3No2dFDFGTsxxpG5uJh7n7epu4trkrX7x7DogT5Uv6fcLW5"
 
 # An account key whose addresses have never been used.
 #
@@ -199,6 +207,7 @@ def _ensure_prerequisites():
 	frappe.db.set_value(
 		"Crypto Rail", RAIL, "testnet_recipient", WATCHED_ADDRESS, update_modified=False
 	)
+	frappe.db.set_value("Crypto Rail", RAIL, "testnet_xpub", "", update_modified=False)
 	frappe.db.commit()
 	return company
 
@@ -638,13 +647,6 @@ def _run_checks():
 		mainnet_refusal or "not refused",
 	)
 
-	# The "both bindings at once" rule is deliberately NOT asserted here: it
-	# has become unreachable through any rail that exists. A bitcoin rail
-	# refuses a fixed recipient and every other family refuses a key, so
-	# nothing can hold both. The rule stays in `validate` as the general
-	# statement, and this comment is here so the next reader knows the gap is
-	# a consequence rather than an oversight.
-
 	btc.reload()
 	btc.testnet_recipient = ""
 	btc.testnet_xpub = HARNESS_ACCOUNT_VPUB
@@ -746,6 +748,68 @@ def _run_checks():
 		all(row["binding"] in ("per-sale", "shared") for row in offered.values()),
 		str({name: row["binding"] for name, row in offered.items()}),
 	)
+	check(
+		"Solana reports its reference-bound payments as per-sale",
+		offered.get("sol", {}).get("binding") == "per-sale",
+		str(offered.get("sol", {})),
+	)
+	check(
+		"an EVM rail without an xpub reports its address as shared",
+		not (frappe.db.get_value("Crypto Rail", RAIL, "testnet_xpub") or "").strip()
+		and offered.get(RAIL, {}).get("binding") == "shared",
+		str(offered.get(RAIL, {})),
+	)
+
+	# `binding_category` was added after the first plugin wheel was published.
+	# Requiring it removed that installed Solana adapter from discovery in all
+	# four process environments until the host learned the pessimistic default.
+	# Exercise the app's actual discovery path with that published shape: all
+	# original fields and operations, deliberately no new declaration.
+	sol_key = frappe.db.get_value("Crypto Rail", "sol", "catalog_key")
+	installed_sol = catalog_module.plugins().get(sol_key)
+
+	class PublishedPlugin:
+		pass
+
+	published = PublishedPlugin()
+	for field in (
+		"key",
+		"capabilities",
+		"validate_recipient",
+		"readiness",
+		"capture_baseline",
+		"create_request",
+		"observe",
+		"settle",
+	):
+		setattr(published, field, getattr(installed_sol, field))
+	real_entry_point_rails = catalog_module._entry_point_rails
+	legacy_driveable = False
+	legacy_category = ""
+	legacy_refused = {}
+
+	def published_entry_point_rails():
+		return [("published 0.1.0", published)], {}
+
+	try:
+		catalog_module._entry_point_rails = published_entry_point_rails
+		catalog_module._forget_plugins()
+		legacy_plugins = catalog_module.plugins()
+		legacy_refused = catalog_module.refused_plugins()
+		legacy_driveable = legacy_plugins.get(sol_key) is published
+		legacy_category = binding_category_for(published)
+	finally:
+		catalog_module._entry_point_rails = real_entry_point_rails
+		catalog_module._forget_plugins()
+		catalog_module.plugins()
+	check(
+		"a published plugin without binding_category stays driveable and defaults pessimistically",
+		not hasattr(published, "binding_category")
+		and legacy_driveable
+		and legacy_category == NOT_UNCONDITIONAL
+		and not legacy_refused,
+		f"driveable={legacy_driveable} category={legacy_category!r} refused={legacy_refused}",
+	)
 	# A single address on a fresh-address rail is virgin until its first
 	# payment: it charges perfectly, takes one payment, and then refuses every
 	# sale afterwards. Refused at configuration time and again at charge time,
@@ -811,19 +875,55 @@ def _run_checks():
 			frappe.delete_doc("Crypto Rail", twin_name, force=True, ignore_permissions=True)
 		frappe.db.commit()
 
-	# And a key on a rail this terminal cannot build addresses for is refused
-	# at the form rather than at the counter. Before this, an EVM rail given a
-	# key derived a bech32 BITCOIN address and offered it as the recipient.
-	nonderiving = frappe.get_doc("Crypto Rail", RAIL)
-	nonderiving.testnet_recipient = ""
-	nonderiving.testnet_xpub = BIP84_ACCOUNT_VPUB
-	nonderiving_refusal = _refusal_message(lambda: nonderiving.save(ignore_permissions=True))
+	# EVM uses ordinary xpub version bytes on testnets too. Bitcoin's vpub is a
+	# P2WPKH declaration from SLIP-132, so accepting it here would derive a
+	# valid-looking address for material explicitly exported for another family.
+	evm = frappe.get_doc("Crypto Rail", RAIL)
+	evm.testnet_recipient = ""
+	evm.testnet_xpub = BIP84_ACCOUNT_VPUB
+	wrong_family_refusal = _refusal_message(lambda: evm.save(ignore_permissions=True))
 	check(
-		"a key is refused on a rail whose addresses cannot be derived",
-		bool(nonderiving_refusal) and "cannot derive its own addresses" in nonderiving_refusal,
-		nonderiving_refusal or "not refused",
+		"an EVM rail refuses Bitcoin vpub receiving material",
+		bool(wrong_family_refusal) and "EVM" in wrong_family_refusal and "vpub" in wrong_family_refusal,
+		wrong_family_refusal or "not refused",
 	)
-	nonderiving.reload()
+
+	evm.reload()
+	evm.testnet_recipient = WATCHED_ADDRESS
+	evm.testnet_xpub = BIP32_DEPTH_THREE_XPUB
+	two_bindings_refusal = _refusal_message(lambda: evm.save(ignore_permissions=True))
+	check(
+		"an EVM rail refuses a derived key and a fixed recipient together",
+		bool(two_bindings_refusal) and "different payment bindings" in two_bindings_refusal,
+		two_bindings_refusal or "not refused",
+	)
+
+	evm.reload()
+	evm.testnet_recipient = ""
+	evm.testnet_xpub = BIP32_DEPTH_THREE_XPUB
+	evm.next_address_index = 0
+	evm.save(ignore_permissions=True)
+	frappe.db.commit()
+	evm_first = catalog_module.recipient_for(evm, "testnet")
+	evm_second = catalog_module.recipient_for(evm, "testnet")
+	check(
+		"two EVM allocations receive two different addresses",
+		evm_first != evm_second,
+		f"{evm_first}, {evm_second}",
+	)
+	check(
+		"every allocated EVM address verifies through the library validator",
+		all(
+			core_addresses.validate(RAIL, address, "testnet") == (core_addresses.OK, "")
+			for address in (evm_first, evm_second)
+		),
+		f"{evm_first}, {evm_second}",
+	)
+	check(
+		"the EVM address index advances exactly twice",
+		int(frappe.db.get_value("Crypto Rail", RAIL, "next_address_index") or 0) == 2,
+		str(frappe.db.get_value("Crypto Rail", RAIL, "next_address_index")),
+	)
 
 	# ---------------------------------------------------------------
 	#     Money that arrived after the terminal stopped looking.

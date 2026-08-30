@@ -32,6 +32,15 @@ SETTLED = "settled"
 NEEDS_REVIEW = "needs-review"
 SETTLEMENT_STATES = frozenset({PENDING, SETTLED, NEEDS_REVIEW})
 
+# Whether the rail itself binds money to one sale before a host chooses any
+# receiving-address strategy. Hosts may strengthen NOT_UNCONDITIONAL rails by
+# deriving a fresh address per sale; they must not infer this declaration from
+# that deployment choice because references, subaddresses, and payment ids bind
+# without an xpub field.
+UNCONDITIONAL_PER_SALE = "unconditional-per-sale"
+NOT_UNCONDITIONAL = "not-unconditional"
+BINDING_CATEGORIES = frozenset({UNCONDITIONAL_PER_SALE, NOT_UNCONDITIONAL})
+
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SYMBOL = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,31}$")
@@ -448,9 +457,30 @@ class Readiness:
 		return ""
 
 
+def binding_category_for(rail):
+	"""Return a rail's declared category, defaulting old plugins pessimistically.
+
+	The first published PaymentRail plugins predate this declaration. Absence is
+	therefore a known older contract, not a malformed plugin, and means only that
+	the host has no evidence of an unconditional per-sale binding. A declaration
+	that is present but outside the vocabulary remains a plugin defect.
+	"""
+	category = getattr(rail, "binding_category", NOT_UNCONDITIONAL)
+	if not isinstance(category, str) or category not in BINDING_CATEGORIES:
+		raise InvalidRailPlugin("binding category must be one of the documented PaymentRail values")
+	return category
+
+
 @runtime_checkable
 class PaymentRail(Protocol):
-	"""Structural interface loaded from the ``cryptopos.rails`` entry-point group."""
+	"""Structural interface loaded from the ``cryptopos.rails`` entry-point group.
+
+	``binding_category`` is an optional declaration rather than a structural
+	member because it was added after the first plugins were published. Hosts use
+	:func:`binding_category_for`, which treats absence as ``not-unconditional``:
+	old plugins remain driveable and their binding is understated safely. A plugin
+	that does declare the field must use one of the two documented values.
+	"""
 
 	key: str
 	network: Network

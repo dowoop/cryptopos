@@ -1362,3 +1362,1631 @@ a review queue: it stops.
 **The binding is the better answer and it was already the surviving one.** What
 this entry adds is that the alternative is not merely inelegant — it has a
 measured running cost that a demo cannot pay indefinitely.
+
+---
+
+## D23 · The Amoy finality gate was checked against a stale tip — FIXED, 2026-08-24
+
+Native POL was promoted from `RequestRail` to a fully capable rail today (D24),
+and the first sale on it was paid, landed on chain, and **never credited**. The
+sale sat `awaiting` with an empty `watch_scratch` until its lock ran out, then
+ended `needs_review` saying *"the last look never reached the chain"* — the D19
+diagnostic doing its job on a genuinely unreachable look.
+
+**The look was not unreachable. It was self-contradictory:**
+
+```
+RailProviderError: Provider for rail 'polygon:amoy/native:pol' is not safe to
+use: finalized block is above the latest block.
+```
+
+**The mechanism, reproduced.** `EthereumSepoliaRail.observe` read the chain tip
+first, scanned for transfers second, and asked for the finalized tip **third** —
+then compared that fresh finalized height against a `tip` captured before the
+scan:
+
+```python
+tip = self._tip(provider)                                 # instant A
+transfers = self._native_transfers(...)                   # minutes
+finalized_tip = self._finalized_tip(provider, tip)        # instant B, vs A
+```
+
+`_native_transfers` costs **one `eth_getBlockByNumber` per block**. The sale's
+baseline was ~975 blocks behind by the time it was polled, so the scan was ~975
+sequential RPC calls. Amoy produces a block every ~2 s and finalizes 0–2 blocks
+behind the tip (D18), so by instant B the finalized height was legitimately
+*hundreds of blocks above* the tip from instant A. The guard fired every time.
+
+**Why no rail had ever hit it.** The guard needs three things at once, and until
+today no rail had all three:
+
+| | needs | `eth` | `usdc-eth` | `usdc-pol` | `pol` |
+|---|---|---|---|---|---|
+| a finalized-tip gate | Amoy only | no | no | **yes** | **yes** |
+| per-block scanning | native only | **yes** | no | no | **yes** |
+| a fast chain | Amoy only | no | no | **yes** | **yes** |
+
+`usdc-pol` has the gate on the fast chain but reads logs with **one**
+`eth_getLogs`, leaving almost no window — which is exactly why it settled twice
+today without complaint. `eth` scans per block but on 12-second Sepolia and
+never calls the finalized gate. Native POL is the first rail to combine all
+three, and it failed on its first payment, every time.
+
+**The fix is ordering, not arithmetic.** `_finalized_tip` now runs beside the
+`tip` it is checked against, before the scan. Both numbers describe one instant,
+so the guard compares like with like. Reading it earlier can only make the gate
+**more** conservative — an older finalized height matures fewer transfers, never
+more — so this loosens no safety property.
+
+**What it cost to find:** one real payment. `CPS-2026-00261` sent
+0.084694 POL to the merchant address and ended `needs_review` unbooked. That
+money is real, it is unapplied, and under D10 it stays that way until a human
+reconciles it — which is the correct outcome for a sale the terminal could not
+verify in time, and a fair price for the finding.
+
+**What it says about the gates.** Every suite was green before and after. 604
+tests, 100% line coverage and full mutation coverage did not see it, because it
+is a race between two RPC calls whose window only opens on a chain no fixture
+runs against. **The same shape as D19**: the parts were each correct, the whole
+was not, and only a real payment on a real chain could tell the difference.
+`prove_end_to_end.py --rail pol --send` is now the check that would catch it.
+
+## D24 · Native POL is a real rail — TAKEN, 2026-08-24
+
+`polygon:amoy/native:pol` was a `RequestRail` carrying the blocker *"the
+provider-specific observer has not been extracted into this package"*, so the
+terminal could build a POL payment request and could never see one arrive.
+
+**Nothing needed extracting.** Native observation is the `token_contract=None`
+path `EthereumSepoliaRail` already had, and the maturity gate is the Amoy
+finalized-block rule `PolygonAmoyUsdcRail` already had. The rail was request-only
+because nobody had composed the two halves, not because either half was missing.
+The class was renamed `PolygonAmoyRail` — the finalized gate is a property of the
+chain, not of the asset — and native POL is one line beside the USDC instance.
+
+**Proven, not asserted.** `CPS-2026-00262` charged $0.01, was paid from the
+bundled wallet, settled against a real Amoy transaction and booked
+`ACC-SINV-2026-00060`, credited 83,297,000,000,000,000 of 83,297,000,000,000,000
+wei exactly. It is the fifth rail this deployment can take money on.
+
+**What this does not change.** POL receives at the same static address as the
+other three EVM rails, so **D5 applies to it in full** and `rails_probe` now
+reports four problems instead of three. It is not a step toward a public
+instance; it is a step toward *any asset*, which is a different axis.
+
+**And a caution that is not the rail's fault.** `rates.quote("POL")` returns the
+**mainnet** price — 118,058 microcents on the day — so a testnet POL sale is
+priced as if the token were real. That is D6's fourth rejection ("a crypto
+position report... would value a faucet token at the mainnet price") showing up
+in the charge path rather than in a report. A $1.00 sale wants 8.47 POL, which is
+more POL than the bundled wallet holds; the proof above used $0.01 for that
+reason.
+
+---
+
+## D25 · The stranding message told the Bitcoin operator the opposite of the truth — FIXED, 2026-08-24
+
+The first real Bitcoin payment from the bundled payer stranded exactly as D11
+predicted — `CPS-2026-00263`, 1,238 sat broadcast, sighted in the mempool,
+`detected` for the full 15 minutes, no block, `needs_review`. That part is
+working as designed and is not the finding.
+
+**The finding is what it said:**
+
+> 1238 arrived at this address inside the window but could not be tied to this
+> sale. It is real money and **it is not provably this customer's payment**.
+
+That sentence is false on this rail. The address was
+`tb1q65rqjw60qk3gedqnq4rh3nrerrkmj4nghgr7ps` — derived from the merchant xpub
+**for this sale and for no other** (D7). Money there is provably this customer's
+payment; that is the entire reason per-sale derivation exists. What actually
+happened is narrower: the transaction did not reach **1 confirmation** before the
+rate lock expired.
+
+**Why it was wrong.** `watch.py` hardcoded one sentence for both stranding
+branches, and that sentence was written for the shared-address case, where it is
+exactly right (D5). Bitcoin is the one rail in this deployment whose attribution
+is sound, and it was being handed the shared-address apology.
+
+**The damage is to the human, not the ledger.** No state, transition or amount
+was wrong. But a review queue is read by a person deciding whether they may book
+money, and this told them the strongest binding in the system was the weakest.
+It would push an operator toward *not* booking a payment they are entitled to
+book — or toward distrusting D7 and abandoning the one thing that works.
+
+**The fix.** `_unbindable_reason(rail, sighted, gate)` follows the rail's actual
+binding: a rail with a `testnet_xpub` says the money **is** this customer's and
+names the gate it missed; a rail on a shared recipient keeps the original
+wording, unchanged, because for it nothing better can honestly be said.
+
+**Same family as D19 and D23.** Every suite green, no wrong number, and the only
+thing defective was what the system said about itself. Three in one day is not a
+coincidence: this codebase's remaining defects are concentrated in its
+explanations, because those are the part no assertion checks.
+
+---
+
+## D26 · An operator's own asset can be charged — TAKEN, 2026-08-24
+
+Codex argued that the `cryptopos.rails` entry-point registry is not an extension
+point, and that "any asset" fails anyway because `charge()` calls
+`_core_rails.rail_for(rail.rail_key)`, which knows twelve keys and raises a bare
+`KeyError` for a thirteenth. **Both claims were reproduced.** The second took two
+attempts: the first probe was refused earlier and more politely, by the endpoint
+check, and only a fully configured rail with a price reached the `KeyError`.
+
+**The wall was one line, and the data to get past it was already in the row.**
+`invoice_amount` and `usd_cents_to_native` read exactly two fields —
+`native_decimals` and `display_decimals` — and the `Crypto Rail` DocType carries
+both. `install.py` seeds them from the frozen table, and all five enabled rails
+were verified byte-identical between row and table before the switch, so nothing
+about them changed.
+
+It was also a split brain. Six lines below the `rail_for` call, the same function
+already priced its own error message from `rail.unit_name` — the row. Two sources
+of truth for one rail, and only one of them could describe a rail the operator
+added.
+
+`_scale_of(rail)` now reads the row, and asserts the one thing the DocType
+cannot: that `display_decimals <= native_decimals`, because a display precision
+finer than the chain's own asks for an amount no URI can state.
+
+**Proven.** A disposable rail `zzz-probe` for a fabricated asset `ZZZ`, given a
+demo price of $25.00, charged $1.00 to **0.040000 ZZZ** exactly, with a valid
+Amoy URI and `rate_source = "demo-fixed (no feed answered)"`. Before this it was
+`KeyError: 'zzz-probe'`. Harness 78/78 after, and `usdc-eth` re-proved end to end
+(`CPS-2026-00285`) crediting the identical 1,000,030 as before.
+
+**What is still required to add an asset**, and none of it is code:
+
+1. a `Crypto Rail` row — gate in words, scales, recipient, endpoint;
+2. a `catalog_key` naming an adapter that already exists (observation is still
+   per-family code, exactly as D6 and Codex said);
+3. a price — a live feed, or one entry in `rates.DEMO_MICROCENTS`, which can
+   never price real money because `quote_detailed` refuses the fallback for
+   real-money modes before reaching it.
+
+**Codex reviewed this design cold afterwards and named a check this had
+missed.** Trusting the row is only safe if the row agrees with the adapter that
+will watch for the money. The frozen table could not be edited by an operator; a
+DocType row can, and a row claiming 6 native decimals in front of an 18-decimal
+adapter would invoice **a millionth** of the intended amount and settle it as
+paid in full — with every arithmetic assertion in this codebase agreeing,
+because they would all be reading the same wrong number.
+
+`_scale_of(rail, adapter)` now refuses when `rail.native_decimals` disagrees with
+`adapter.asset.decimals`. Reproduced both ways on a disposable rail: at 18 it
+charges 0.040000 ZZZ, at 6 it refuses with *"Probe / ZZZ says 6 native decimals;
+the polygon:amoy/native:pol adapter says 18."* Harness 78/78 with the check in.
+
+This is the second time today Codex was right about something reproduced only on
+the second attempt, and the pattern is worth naming: **its claims failed the
+first probe because an earlier, politer guard fired first.** A finding that does
+not reproduce immediately is not yet refuted.
+
+**What this does not do.** It does not make an *observer* out of nothing: a rail
+whose family has no adapter can be charged and never watched, which is why
+`require_chargeable` still gates on the four capabilities. Extensibility here is
+the charge path only.
+
+## D27 · Exhausting POL took down two rails, not one — 2026-08-24
+
+Two $0.01 native-POL sales consumed 96.5% of the payer's Amoy balance (D24), and
+the next `usdc-pol` proof then failed before broadcasting:
+
+```
+customer balance 6,288,191,980,896,006 wei; worst-case need 16,527,615,277,120,000
+NOT ENOUGH - fund the customer wallet first
+```
+
+**An ERC-20 transfer is paid for in the native coin.** So the rail that D18
+identifies as the only one fit for a public instance — `usdc-pol`, ~2 s finality
+— is down, and it is down because a *different* rail spent the gas. The USDC
+balance is untouched at 18.99997.
+
+This makes the mainnet-pricing question (D24) sharper than "one rail is
+uneconomic". Native POL priced at $0.118 is a **drain on the shared gas budget of
+every Amoy rail**, and the faucet refills roughly one sale at a time. The refusal
+itself is honest and named the coupling, which is the only reason this was two
+minutes of diagnosis rather than a mystery.
+
+---
+
+## D28 · The books-vs-chain check was reconciling a population somebody typed — FIXED, 2026-08-25
+
+`tender-apps/apps/settled.py` is the only thing in this workspace that checks
+**the books agree with the chain**, and it is the claim a point-of-sale has to
+be able to make. It ran against `settled_fixture.json`, captured by hand in a
+session, once.
+
+**The arithmetic was never wrong. The population was.** The fixture's own header
+said it held *"Every confirmed Crypto Sale on this ERPNext instance that carries
+a real chain transaction"*. Queried live on 2026-08-25 the instance held **25**
+such sales and the fixture held **23**. Missing: `CPS-2026-00285` (`usdc-eth`)
+and `CPS-2026-00286` (`usdc-pol`) — both settled 2026-08-24 21:5x, both *before*
+the fixture's own `captured_utc` of 2026-08-25T06:42:38Z, and both named in
+`CONTINUE.md`'s proven-rails table. Read off the chains they agree exactly:
+
+```
+usdc-eth   booked=   1000030  chain=1000030  AGREE
+usdc-pol   booked=   1000030  chain=1000030  AGREE
+```
+
+Nothing could have noticed. A reconciliation over a hand-picked set says the
+sales in the set agree; it says nothing about the ones that were not typed in,
+and it is silent in exactly the direction that matters — money the books hold
+and nobody checked.
+
+**Fixed as a probe, not as a better fixture.** `tools/settled_capture.py` reads
+the books, `settled.py --capture` reads the chains, and the two are separate
+processes on purpose:
+
+```bash
+cd sites && ../env/bin/python ../apps/cryptopos/tools/settled_capture.py > books.json
+PYTHONPATH=site-packages python3 apps/settled.py --capture books.json
+```
+
+A single pass that read both sides and wrote both numbers would agree with
+itself by construction and prove nothing. The probe opens no socket; the
+reconciler never touches ERPNext.
+
+**Result, 2026-08-25:** 25 of 25 sales match the chain exactly, across five
+rails, in five different smallest units, with no USD anywhere.
+
+**Two things the capture refuses rather than includes**, each because including
+it would make a true-looking number: a confirmed sale whose `tx_id` is not
+chain-shaped (a harness wrote it — a fixture that agrees is worse than one
+that is missing), and a confirmed sale with a chain tx and no Sales Invoice
+(settled and never booked, which is `reconcile.late_payments`' business and not
+a books-vs-chain fact). Both are named in an `excluded` list rather than
+dropped in silence.
+
+**And the reconciler now grows with the deployment.** It took the exponent from
+a table of five rail keys and would have `KeyError`d on an asset an operator
+added — D26's whole point. It now reads `native_decimals` off the captured
+`Crypto Rail` row, cross-checks it against its own belief for the five it knows
+(a disagreement is a factor of ten thousand and looks fine), and for a rail it
+has never heard of registers a code derived from the rail key that **starts
+with a digit** — no real ticker does, which is what stops an operator's `pol`
+row being registered as mainnet `POL` and quietly adding to it.
+
+---
+
+## D29 · The plugin path was a claim, not a capability — TAKEN, 2026-08-25
+
+`cryptopos_core` has declared a `cryptopos.rails` entry-point group since it was
+packaged. `catalog.plugins()` read `builtin_rails()` and nothing else, so the
+group was decorative: an operator could install a rail wheel and the terminal
+would never see it. "An operator can add an asset" (D26) was true only for an
+asset one of the twelve built-in adapters already spoke.
+
+`cryptopos/catalog.py` now discovers the group, caches the registry per process,
+and **fails closed on a duplicate key**.
+
+**Why refusal and not precedence.** `network.key/asset.key` names the concrete
+money — one chain, one asset, one contract. Two adapters claiming it are not two
+assets, so there is no correct winner:
+
+- external-over-builtin makes behaviour depend on install order;
+- builtin-over-external silently defeats an install the operator performed on
+  purpose;
+- namespacing by vendor is false identity — two implementations of the same
+  Amoy token do not become two financial assets because their vendors differ.
+
+**Three refusal shapes, all visible.** An entry point that fails to import, one
+that loads something without a rail's shape, and one whose key is already taken
+are each recorded with a reason. `plugin_for` distinguishes *nothing is
+installed* from *something is installed and was refused* — those send an
+operator to do opposite things — and `tools/rails_probe.py` prints the whole
+registry, built-in and installed, with every refusal.
+
+**Measured on the running instance:** 12 adapters, 12 built in, 0 installed,
+0 refused. `cryptopos_core` is on the container's path rather than installed as
+a distribution, so it advertises no entry points there — which is why the
+identity check that makes a self-advertising builtin idempotent is written and
+not yet exercised.
+
+---
+
+## D30 · An external plugin may not supersede a built-in — REJECTED, 2026-08-25
+
+D29's registry refuses a duplicate `catalog_key`. That locks out the case the
+plugin path exists for: `solana:devnet/native:sol` is a `RequestRail`
+placeholder whose own blocker says *"the provider-specific observer has not
+been extracted into this package"*, and a wheel that really does observe and
+settle Solana devnet cannot claim the key because a stub admitting it cannot do
+the job is sitting on it.
+
+So a narrow exception was proposed: an external adapter may supersede a
+**built-in that lacks OBSERVATION or SETTLEMENT**, if the external has all four
+capabilities and exactly one external claims the key. Codex was asked to argue
+against it. **It won, on four grounds, and one of them was a defect in the
+discovery code rather than in the proposal.**
+
+**1. The uniqueness condition is only true at one instant.** Install adapter A,
+charge a sale under it, uninstall A, install B under the same key, restart
+everything. Exactly one external claimant before and after. B then
+reinterprets A's persisted baseline and can settle a payment A would have
+refused, because `charge.py` stored the endpoint, the gate and the catalog key
+and **no implementation identity at all**, and `watch.py` re-resolves the
+adapter from the mutable rail row on every heartbeat. Verified by reading both.
+
+**2. Four capabilities are not a settlement ABI.** A plugin can declare all
+four, pass readiness and conformance, and still attribute by recipient and
+amount while ignoring the payment reference. Two concurrent sales for the same
+amount at the same address, the scheduler polls the unpaid one first, it
+claims the paid one's transaction, and `_claimed_transaction_ids()` then locks
+the customer who actually paid out of their own sale. Nothing in the contract
+proves a plugin enforces the binding it advertises. The same hole lets a row go
+on telling the operator *finalized* while the replacement settles at
+*confirmed* — the row's gate is never passed to `adapter.settle()`.
+
+**3. Mixed workers.** Frappe runs web, scheduler and two queues, and the
+registry is cached per process. Restart the web workers only: a charge is taken
+under the plugin, and every heartbeat resolves the same key to the cached
+placeholder, gets `UnsupportedCapability`, and a fully paid sale reaches expiry
+as `needs_review`. The flat refusal masks this class; the exception activates
+it.
+
+**4. The defect this argument found in D29's own code.** `_entry_point_rails()`
+kept candidates in a dict keyed by `point.name`. Two distributions may choose
+the same entry-point name, so one was dropped **before the collision check ever
+ran**, and the survivor was whichever metadata iteration reached last.
+Reproduced against the first draft:
+
+```
+candidates surviving: 1 -> collision check sees ONE of two wheels
+winner is metadata iteration order: True
+```
+
+Fixed: candidates are keyed by origin — distribution name, version and entry
+point — so every claimant reaches the check and the refusal names who already
+holds the key.
+
+**One correction to the attack, checked:** a `RequestRail` cannot itself have
+settled sales, because `require_chargeable()` refuses it before a sale is
+created. The dangerous records are in-flight or historical sales created by an
+*earlier external adapter*, which is ground 1 and stands.
+
+**Taken instead — the part of the attack that generalises.** Grounds 1 and 2
+are not properties of the exception; they are properties of the whole plugin
+path, and they would have shipped with D29. So `charge()` now stamps
+`identity_extras["adapter"]` with the implementation that created the sale, and
+`watch()` refuses to advance an in-flight sale whose implementation changed
+underneath it:
+
+> this sale was charged under X and this process is running Y. A different
+> implementation of KEY must not settle an intent it did not create.
+
+Sales charged before the stamp existed carry no `adapter` and are left alone —
+stranding money over a field that did not exist would be a worse bug than the
+one being fixed. App harness after the change: **78 passed, 0 failed.**
+
+**What stays open.** The placeholder still holds a key no plugin may claim.
+Resolving that is a source-level decision about `BUILTIN_RAILS` — deterministic,
+made once, with no install-order dependence — and it is not this entry's to
+take.
+
+---
+
+## D31 · A rail arrived as a wheel and took a real sale — TAKEN, 2026-08-25
+
+The first rail this deployment ever gained without editing this app.
+`pip install cryptopos-rail-solana`, one `Crypto Rail` row, and Solana devnet
+went from *described* to *driveable*:
+
+```
+driveable: 6
+solana driveable: True
+identity: cryptopos-rail-solana 0.1.0 [solana-devnet-sol]
+```
+
+Then, end to end, with the bundled payer and real devnet money:
+
+```
+CPS-2026-00328  102000 lamport -> GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc
+binding reference ubGNWtvZLgKk2F66PVwLVPr6WhVxNFF1XTzh3MYdrEL
+broadcast 4s8nk6WwiUDbM2DuFsVDHBQ2pyWbwm684TvY9DAjvbiCSCE18VsRLBP2PXKitCCXtbNu1uqjjqdKew98JL4yHPkG
+PASS the sale settled -- confirmed
+PASS it credited exactly what it invoiced -- credited 102000 of 102000
+PASS it booked an ERPNext invoice -- ACC-SINV-2026-00075
+```
+
+**And it binds.** Solana Pay's `reference` is a fresh account the payer includes
+on the transfer, derived here as `base58(sha256(intent_id))` — recomputed in
+`observe`, never stored. Only this sale's money touches it. That puts `sol`
+beside `btc` (D7) rather than beside the three EVM rails that still cannot
+attribute (D5). It is the second rail here with a real payment binding, and the
+first one that got it for free from the protocol.
+
+### The first attempt failed with the money already spent, and the reason is a deployment fact nobody had written down
+
+`prove_end_to_end.py --rail sol --send` broadcast a real payment and the sale
+ended `needs_review`, credited 0:
+
+> no payment intent on this sale: Rail sol names solana:devnet/native:sol,
+> which this deployment knows about and cannot drive
+
+**The containers do not share a Python environment.** `pip install` had been run
+in `backend`, which is where `charge()` runs; the heartbeat runs in
+`queue-short`, `queue-long` and `scheduler`, and all three answered
+`PackageNotFoundError`. So the terminal could *sell* on a rail it could not
+*watch*.
+
+This is D30's third ground — mixed workers — reproduced with real money, and
+worse than the version argued: it is not a stale in-process cache that a
+restart fixes, it is four separate installations. The `catalog.py` docstring
+already said *"a rail half the deployment can see is worse than one nobody
+can"*. It was written as a caution and turned out to be a description.
+
+**Nothing was lost and nothing was misbooked.** The refusal named the rail, the
+key and the blocker, the sale went to `needs_review` rather than crediting
+zero, and D10 kept it there. Installing into all four containers and restarting
+made the same command pass on the next run.
+
+**The operator procedure, therefore, is four installs and a restart** — not one.
+A deployment that gains a rail in one process and not the others is the shape
+this failure takes, and it will take it again for the next plugin.
+
+### The oversight grew with it, and its own guard was wrong first
+
+`tools/settled_capture.py` excluded the sale — *"tx id is not chain-shaped — a
+harness wrote it"*. A Solana signature is 64 bytes of **base58**, 86–88
+characters; the shape list held EVM hex and Bitcoin hex and nothing else. The
+guard fired honestly and its rule was wrong, which is exactly the failure the
+`excluded` list exists to make visible instead of silent — an enumerated list of
+two chains' id shapes is a reconciler that stops covering the shop the moment
+its operator adds a third.
+
+With base58 added and a lamport reader in `settled.py`:
+
+```
+CPS-2026-00328  sol                     102000              102000  exact
+26 of 26 sales match the chain exactly.
+  sol          1 sales                  0.000102000 DEVSOL  (102,000 lamport)
+```
+
+### One defect in the plugin, and how it survived fourteen green tests
+
+The build was dispatched to Codex against `ORDER-solana-rail-plugin.md`. It came
+back with 14 passing tests, zero conformance issues, and
+`DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1"` — the real hash
+truncated at 32 of its 44 characters. `_verify_network` compares it to
+`getGenesisHash`, so **the plugin would have refused every real devnet node as
+not-devnet**, and every test passed because no test touches a node. Read off the
+chain instead:
+
+```
+{"jsonrpc":"2.0","result":"EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG","id":1}
+```
+
+Corrected, readiness against the live endpoint returns all four capabilities and
+`chargeable: True`. Codex also ran a lint autofix across three files it had been
+told not to touch; those edits were reverted.
+
+---
+
+## D32 · The refusals that had never fired — EXERCISED, 2026-08-25
+
+D29 shipped three refusal branches and D30 added a fourth. Every one of them
+was written, reviewed, and **never once executed**: the deployment had 12
+adapters, 0 refused. That is the same shape as the truncated genesis hash in
+D31 — a claim that is only true offline — so they were driven on purpose.
+
+Driving them found a real asymmetry and one flawed test of my own.
+
+**The asymmetry.** A *built-in* that cannot observe or settle is filed as
+described rather than driveable. An *external* arriving with the same gap was
+registered as an adapter anyway. Exercised:
+
+```
+3 an external claiming a DESCRIBED key with no capabilities:
+    REFUSED halfrail 0.1 [h]: claims zcash:testnet/native:zec without being able
+    to check the receiving address, watch for the payment, ...
+```
+
+Nothing was ever at risk of being mis-settled — `require_chargeable` refuses a
+capability-less adapter at the counter. What was at risk was the **message**: the
+impostor displaced the described entry, so the operator lost the blocker
+explaining why that money cannot be taken and gained a rail refused for reasons
+it no longer stated. Same class as D25. Externals now clear the same bar as
+built-ins, because it is the same question.
+
+**The two collision refusals, driven:**
+
+```
+1 two externals claiming one key:
+    REFUSED beta 2.0 [b]: claims x:y/native:z, which is already provided by alpha 1.0 [a]
+2 an external claiming a DRIVEABLE builtin:
+    REFUSED impostor 9.9 [i]: claims bitcoin:testnet4/native:btc, which is already provided by builtin
+```
+
+**D30's identity guard, driven.** A real sale was charged on `sol`, its
+`identity_extras["adapter"]` stamp was edited to a different implementation, and
+one heartbeat run — `CPS-2026-00339`, deliberately never paid:
+
+> no payment intent on this sale: RuntimeError: this sale was charged under
+> some-other-rail 0.0.1 [x] and this process is running cryptopos-rail-solana
+> 0.1.0 [solana-devnet-sol]
+
+**And the capture's shape rule, driven** — the branch that wrongly excluded the
+first Solana sale now classifies all three:
+
+```
+solana signature   -> solana
+harness placeholder -> None (excluded, and named)
+real evm tx        -> evm
+```
+
+**One test of mine was wrong before the code was.** The first attempt at the
+duplicate check stubbed out entry-point discovery, so the impostor claimed a key
+nothing else held and was — correctly — accepted. The refusal had not failed;
+the scenario had not been built. Worth recording because it is the failure mode
+of testing a guard: it is easy to write a case the guard was never meant to
+catch and read the pass as evidence.
+
+---
+
+## D33 · D31's binding claim was false as implemented — CORRECTED, 2026-08-25
+
+D31 said the Solana rail "binds a payment to a sale" with "no ambiguity", and
+`tools/rails_probe.py` was changed to stop reporting it as a D5 shared address.
+**That was wrong, and it was wrong in the direction this workspace treats as
+worst: a surface telling an operator the opposite of the truth.**
+
+Codex was asked to attack the plugin after it had already taken real money. It
+returned nine findings and claimed to have executed several. The central one
+was reproduced here before anything was changed.
+
+### The finding: a reference is a search key, not proof
+
+`getSignaturesForAddress` returns every transaction whose account list
+**mentions** the address. It does not say which instruction used it or what
+that instruction moved — and Solana Pay permits several references on one
+transfer. The rail decoded no instructions: it checked that the recipient and
+the reference each appeared once in `accountKeys`, then credited the
+recipient's whole transaction-wide balance delta.
+
+Reproduced against the implementation — one 100-lamport transfer whose account
+list names two sales' references:
+
+```
+  A (invoiced 60): sees 100 lamports -> settled
+  B (invoiced 40): sees 100 lamports -> settled
+  B once A has claimed that signature: needs-review
+```
+
+One payment, two invoices booked. Whichever polls first wins and the other goes
+to review. That is a race deciding which sale steals the money, not attribution.
+
+### Fixed by reading the instruction, not the balance
+
+Credit now comes only from `SystemInstruction::Transfer` instructions — data
+decoded from base58, discriminant 2, little-endian u64 — whose `accounts[1]` is
+the recipient and whose account list carries this sale's reference **and no
+other extra account**. The multi-reference case is refused outright rather than
+attributed:
+
+```
+THE ATTACK: one transfer, both references on the SAME instruction
+  A (invoiced 60): credited 0 -> needs-review
+  B (invoiced 40): credited 0 -> needs-review
+THE HONEST SHAPE still works:
+  A (invoiced 60): credited 60 -> settled
+SPLIT PAYMENT across two referenced transfers still sums:
+  A (invoiced 60): credited 60 -> settled
+```
+
+An unreferenced instruction paying the same merchant in the same transaction is
+no longer credited: 102 became 60, which is the half that is ours.
+
+The rail also refuses when the instructions claim more arrived than the
+recipient's balance moved. Picking the larger number is how an inconsistent or
+lying node gets believed.
+
+**Verified against the chain, not only the fixtures.** `getTransaction` for the
+transfer that proved this rail returns account keys
+`[payer, merchant, reference, system program]` and one instruction over accounts
+`[0, 1, 2]` — exactly the shape now required — and parses to `(102000, ...)`.
+Re-proved live afterwards: `CPS-2026-00351` → `ACC-SINV-2026-00081`.
+
+### Two more that lose or misstate money, both fixed
+
+**The baseline discarded a payment landing in the slot it was read at.**
+`ObservationBatch` requires a transfer to sit strictly above the baseline, so
+recording the current confirmed slot excluded any payment in that same slot —
+permanently, because nothing looks below the baseline again. `capture_baseline`
+now records the last slot already behind the sale.
+
+**A knowingly incomplete history still settled.** The signature walk stops at a
+10,000 safety limit and says so; `settle` checked `credited >= invoiced` before
+looking at that warning, so it wrote a credit it already knew was a lower bound
+into a state D10 says can never be reopened. It now goes to review. That is
+provokable by spamming the reference — a denial of service rather than a theft,
+and the better of the two things to hand an attacker.
+
+### The fixtures agreed with the bug because they came from the same idea
+
+The package's transactions carried **no instructions and no signatures at all**
+and settled anyway, and the recipient was
+`11111111111111111111111111111111` — the System Program. A fixture whose
+recipient is not a wallet cannot represent a payment. Both corrected; the
+account list now matches what devnet actually serves. 14 tests became 20, six of
+them locking down findings that all passed before the fix.
+
+### And a fourth, fixed after the first three
+
+**A pruned node was read as an empty chain.** The rail never called
+`minimumLedgerSlot`. A node prunes; if its retained history advances past the
+slot a payment landed in, `getSignaturesForAddress` returns `[]` — which is
+indistinguishable from *nobody has paid yet*. The sale expired cleanly while the
+money sat finalized on the chain, and nothing anywhere said why.
+
+One call answers it, and devnet answers it: `minimumLedgerSlot` → `486277834`
+against a tip near `487863000`, roughly 1.6M slots retained. When that minimum is
+above the sale's baseline the rail now says so as a history warning — which the
+fix above turns into an operator decision rather than a silent expiry.
+
+### Accepted rather than fixed
+
+- **`blockTime: null` sends a finalized payment to review.** The rail cannot
+  date it, and the sale has an expiry. Crediting a payment it cannot place in
+  time would be worse than a human decision, and the message names both
+  possibilities.
+- **One endpoint is trusted.** True, and true of every rail here — `eth` and
+  `pol` read one JSON-RPC each. Not a property of this plugin.
+- **Address lookup tables are refused, not decoded.** Stated in the README.
+
+### What the claim should have said
+
+The binding is real **now**, because the reference is checked on the instruction
+that paid. It was not real when D31 was written, and `binds_per_sale = True` was
+true of the design and false of the code for about an hour. The lesson is the one
+this repository keeps relearning: **a property is not a property until something
+that could disprove it has been run.**
+
+---
+
+## D34 · Two tools against the one thing a model cannot do — BUILT, 2026-08-25
+
+the maintainer's observation, and it is correct: an agent cannot generate long opaque
+identifiers reliably. This session produced three instances in a few hours, each
+of which survived every offline check:
+
+| string | what it really was |
+|---|---|
+| `EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | the devnet genesis hash, 12 characters short. 14 unit tests passed; the rail would have refused every real node |
+| `11111111111111111111111111111111` | the Solana **System Program**, used as a merchant address in fixtures |
+| `"1" * 87` | a made-up signature. Base58 `1` is a leading zero byte, so it decodes to nothing; devnet answered `Invalid param: WrongSize` |
+
+The common shape is that **a wrong identifier does not look wrong**, and nothing
+in a test suite compares it to anything real. Reading harder does not help.
+
+**`tools/idcheck.py`** — offline, no keys. Given any string it reports the shape,
+**how many bytes it actually carries**, whether a checksum holds, and whether it
+is a well-known constant somebody has mistaken for their own. A short byte count
+is what truncation looks like and it is stated in those words.
+
+Two things it deliberately does not do. It does not keep its own checksums —
+addresses go to `cryptopos_core.addresses.validate`, because a second copy of a
+checksum is a second thing that can be wrong on its own. And it does not report
+`UNCHECKED` per string: Solana, Tari and Ootle publish no local checksum, so
+their validators accept anything, and a line saying "unchecked for xtm" beneath
+a truncated hash reads as a hint that it might be a Tari address. That fact is
+**derived with a control string** and printed once as a footer, so the day one of
+those chains grows a checksum the footer changes itself.
+
+**`tools/snapshot.py`** — the deployment in about twelve lines: adapters
+driveable, installed and refused; which rails bind per sale and which are
+SHARED; sale counts by state; money that settled and never booked; and the three
+most recent settled sales with their real ids and transaction hashes. It replaces
+four `frappe` heredocs that answered the same questions at forty lines each.
+
+Printing real ids is the point rather than a convenience: the tool exists so the
+next session **copies** an identifier instead of typing one.
+
+---
+
+## D35 · Three cold reviewers on one session's defects, and what they found still live — 2026-08-25
+
+the maintainer asked for the session to be reviewed by agents that could not see it, for
+**patterns of reasoning-instead-of-checking**. A dossier of 17 defects was
+written (`SESSION-2026-08-25-DEFECTS.md`) and three Codex agents worked from it
+in parallel: extract the pattern, attack the remedies, hunt live instances.
+
+Every finding below was reproduced here before anything was changed.
+
+### The pattern is not one thing
+
+Nine distinct mechanisms wearing one costume. The ones that earned their keep:
+
+- **Opaque-literal fabrication** — long identifiers cannot be produced from
+  memory, and a wrong one looks exactly like a right one.
+- **Closed-world logic inside an extensible system** — enumerating today's
+  inventory in a build whose stated goal is that operators add assets.
+- **Property laundering** — a design intention becoming a flag, a docstring or
+  an operator message without a counterexample ever having tried to falsify it.
+- **A test whose antecedent is false** — the guard is invoked with the condition
+  it guards against removed, and green means only that some code ran.
+- **Single-process reasoning about a multi-process runtime.**
+- **Duplicated semantics with no shared oracle** — two components answering one
+  question, so fixing one leaves the other wrong.
+
+### The remedies were attacked and lost
+
+`idcheck.py` and `snapshot.py` were charged with covering **3 of 17** defects,
+and with being instances of the pattern themselves. Reproduced, all true:
+
+| claim | check | verdict |
+|---|---|---|
+| `snapshot.py` omits `idle` from the state list | schema says 8 states, tool had 7 | **true** — an idle sale vanished from the breakdown *and the total* |
+| its "bookable" is a one-term approximation | `may_book()` is a five-term gate | **true** — a simulated sale would read as bookable |
+| `idcheck.py` discards `UNCHECKED` | a lowercase EVM address returns *"carries no EIP-55 checksum and a typo in it cannot be detected"* | **true** — the tool dropped the one message that says "we cannot tell" |
+| its footer describes the wrong layer | `validate("xtr", junk)` is UNCHECKED; the Ootle **adapter** REFUSES the same text | **true** — it answered about the legacy validator and printed it as a fact about the terminal |
+| it always exits 0 | — | **true** — it could not gate anything |
+
+Both tools now derive rather than approximate: states from the doctype schema,
+booking from `may_book()`, rail keys from `rails.RAILS`, blanket-unchecked
+reasons from a control string. `idcheck` exits non-zero on anything not whole
+and names the layer it queried. `snapshot` says **THIS PROCESS ONLY** and
+prints `per-sale(claimed)` where the binding is an adapter's assertion rather
+than a derived address.
+
+### What was still live, and cost the most
+
+**1. The legacy Solana watcher had D33's defect, untouched.** `watchers.py`
+called the reference *"collision-proof binding, so every signature here is this
+sale's money"* and never looked at which instruction used it. Reproduced:
+
+```
+ref-A -> 100
+ref-B -> 100
+```
+
+One 100-lamport transfer, two sales, both credited in full. **The plugin was
+fixed this morning and this copy was not, because the fix was reasoned about as
+"the rail" rather than searched for as "every implementation of the rule".**
+Fixed, and the false sentence in the comment corrected.
+
+**2. The simulator could not represent a real payment.** Its fabricated Solana
+transaction had **no instructions at all** — so once the watcher started reading
+them, every demo sale on `sol` stopped settling. The fixture had never been the
+shape a node returns; nothing noticed while nothing read it. Same defect as the
+plugin's original test fixtures. Now emits the shape devnet actually serves.
+
+**3. The reconciler skipped an unknown rail and reported success.** A rail with
+no reader printed `SKIPPED`, left the denominator, and the run ended
+`0 of 0 sales match the chain exactly` followed by `settled: ok`. Oversight
+claiming success while checking none of a new rail's money — in a system whose
+goal is that operators add rails. It now refuses to report success and names
+what it could not check.
+
+**4. The reconciler's own copy of D33 was incomplete.** Written *to apply D33*,
+it required the reference to appear on the instruction and did not reject a
+**second** reference, then fell back to the balance delta. Same transfer,
+`100` for both sales. The rule and its copy drifted apart inside the change that
+created them.
+
+### The structural fix: shared examples, not shared code
+
+`packages/cryptopos-rail-solana/tests/attribution_vectors.json` — ten vectors,
+four of them **real devnet transactions** read off the chain, six hostile, each
+with the amount it actually paid. Both implementations run over them:
+the plugin's own suite, and `tools/attribution_agreement.py`, which loads the
+`tender-apps` reconciler by path and asserts the two agree with the record **and
+with each other**.
+
+Not shared code — a reconciliation that shares an implementation with the thing
+it reconciles proves nothing. Shared *examples*.
+
+**It found an eleventh defect on its first run**, which neither reviewer nor
+author had seen: where the instructions claim more than the balance moved, the
+rail refuses and the reconciler returned 60.
+
+```
+FAIL  instructions claim more than the balance moved
+      rail None · reconciler 60 · expected None
+      THEY DISAGREE — one transaction, two answers
+```
+
+Fixed; now 10/10 agree.
+
+### And the constants nothing was checking
+
+`make check` — lint, four Pythons, 100% executed, full mutation coverage —
+cannot tell you that `USDC_ON_AMOY` is USDC. Every test naming it compares the
+constant to itself; the EIP-55 test catches a typo and passes a wrong-but-valid
+address. `tools/constcheck.py` now derives what can be derived (the ERC-20
+`Transfer` topic *is* keccak-256 of its signature, and this repository ships
+keccak-256 — it never needed remembering) and fetches the rest: contract code,
+`symbol()`, `decimals()` against the rail table, the devnet mint's decimals, and
+the genesis hash. **9/9 pass**, which is the first time any of it was
+established rather than assumed.
+
+### The habit the tools cannot replace
+
+From the pattern agent, and it is the part worth keeping:
+
+> Copy opaque facts from authoritative output. Run topology checks before money.
+> Run the affected gate immediately after edits and reverts. Do not state a money
+> property until a hostile counterexample has failed. When semantics change,
+> search for independent consumers before declaring the fix complete.
+
+`prove_end_to_end.py` now enforces the second of those itself: it refuses to
+spend if the four Frappe workers do not agree about which rails they drive.
+Verified by uninstalling the plugin from `queue-long` and watching it refuse.
+
+---
+
+## D36 · Per-sale EVM addresses attacked again on mainnet economics — REJECTED, and the economic leg was the wrong leg, 2026-08-28
+
+D22 rejected per-sale EVM addresses with a reason that is entirely about a
+faucet: *"gas is a finite, faucet-supplied resource... A public demo that
+recycles its float would drain the POL supply at a fixed rate per visitor and
+need a human at the Polygon faucet to keep running."* The long-horizon goal is
+not a demo, it is a self-hosted business on real chains, where gas is bought.
+So the position was put to Codex to attack:
+
+> D22's rejection is a TESTNET-ECONOMICS argument that does not survive the
+> move to mainnet. At the live POL price the two-transaction recycle cost D22
+> itself measured — ~0.0026 POL — is about **$0.0014 per sale**, a rounding
+> error against any real ticket and an order of magnitude under any card
+> processor's fee. Meanwhile D20 needs a Solidity contract: a class of artifact
+> neither repo has, deployed and audited per chain. For a self-hosted operator
+> the dominant cost is artifact count, not gas.
+
+**It lost, and the reason is worth more than the answer.**
+
+> *"The position is wrong because it mistakes payment attribution for a complete
+> receiving system. Delete D22's faucet argument entirely and D9 still wins."*
+
+The economic objection was the leg I attacked and the architectural one was the
+leg holding the weight. D9 never rested on gas: *"What a real EVM answer would
+need: ... a complete account-management system — global allocation, permanent
+branch monitoring, verified derivation metadata, signer, gas station, sweeper,
+dust accounting. Address generation alone is not the feature."* Making gas free
+does not supply one item on that list.
+
+**Every citation in the counter-argument was checked here, and all six are
+accurate.** That is not the usual outcome and is recorded because it is not:
+
+| claim | where | verified |
+|---|---|---|
+| the library holds no keys and does not sign, sweep or pay out — adding that changes the threat model | `packages/cryptopos-core/SECURITY.md` | verbatim |
+| D9's requirement is an account-management system, not addresses | `DECISIONS.md` D9 | verbatim |
+| money paid past the gap limit is money the operator's own wallet will not find | `cryptopos/catalog.py`, `GAP_LIMIT = 20` | verbatim |
+| the sweep looks back 48 hours and reports an unanswering endpoint as zero found | `cryptopos/reconcile.py`, `WINDOW_HOURS = 48` | verbatim |
+| address allocation holds a row lock across a price-feed call, so one slow feed blocks every concurrent charge | `DECISIONS.md` D11 | verbatim, and already reproduced there |
+| D20 must measure its own balance delta rather than trust `transferFrom` | `DECISIONS.md` D20 | verbatim |
+
+**The three failure modes that decide it**, none of which gas can pay for:
+
+1. **A successful sale can produce revenue the business cannot spend.** A
+   derived address holding only USDC has no native coin. Collecting it needs
+   that address's private key, a signer, a gas station, and nonce replacement.
+   Put the extended private key on the ERPNext host and a Frappe, plugin,
+   backup or web-process compromise is a treasury compromise. Keep it off-host
+   and the "artifact-free" option has just grown a signer service, a sweep
+   queue, a gas station and a recovery database — more artifacts than the one
+   contract it was meant to avoid.
+2. **A restore can silently lose money that was paid.** Address 0 is paid; bots
+   and abandoned checkouts allocate 1–20 without paying; an honest customer pays
+   21; the allocation metadata is lost. A restored wallet stops at the gap and
+   never reaches 21. This repository already documents that exact gap, in the
+   file that allocates.
+3. **An address binds identity, not agreement.** An EOA accepts 99 USDC against
+   a 100 USDC invoice, 101, the wrong token, native coin sent to a token
+   address, and any payment after expiry — unconditionally, forever, because an
+   account has no deadline. Per-sale addressing says *which sale* acquired the
+   problem. D20 binds merchant, token, amount, deadline and salt into the id, so
+   the wrong amount **reverts** and the money is never acquired.
+
+**The conclusion for the stated goal, and it is not the one the costs suggest.**
+D20 is the answer to D5 on the EVM rails, and the reason is not that it is
+cheaper — it is that **it needs no merchant signer at payment time.** That is
+the only shape compatible with the sentence in `SECURITY.md` that defines what
+this library is. Per-sale addresses are not a cheaper way to reach the same
+place; they convert a read-only receiving library into a hot-wallet custody
+system, which is a different product with a different threat model.
+
+**The immutability argument was backwards, too.** Once an address has been
+shown, its derivation path, key and monitoring obligation are permanent, and a
+derivation defect cannot be upgraded away from money already sent there. A
+contract needs no proxy: deploy V2, route new invoices to it, keep V1 for its
+existing state.
+
+**What was NOT measured, and should be before anyone relies on failure mode 2.**
+The live count of consecutive unused Bitcoin addresses on this deployment — the
+rail that *already* allocates per sale under D7. The stack was down, so the
+number is unknown here. `GAP_LIMIT` is 20 and abandoned checkouts consume the
+run; whether this instance is near it is a database query, not an argument.
+
+**Not re-fought, and this entry is the reason not to.** D9, D22 and now D36 are
+three separate attacks on the same option from three different angles —
+correctness, economics, and custody. It has lost all three.
+
+---
+
+## D37 · Role-gating the oversight endpoints "while we wait for step 1" — REJECTED, and the boundary is not where it was being looked for, 2026-08-28
+
+Measured statically over `cryptopos/api.py`: eleven `@frappe.whitelist()`
+endpoints, **seven with no `frappe.only_for` at all**, and **none** constraining
+anything to the calling user. Four of the seven return instance-wide *financial*
+data — `unbooked`, `settled_not_in_ledger_count`, `settled_not_in_ledger_usd`,
+`late_payments` — and both of the query functions behind them use
+`frappe.get_all`, which bypasses row permissions by design.
+
+That looked like ordinary safety work that `GOAL.md` step 1 does not gate, since
+no answer to "one shared shop or a shop each" makes the shop's takings public.
+The position put to Codex was that `frappe.only_for(["System Manager"])` could
+therefore be added today, matching `claim_awards` and `report_award`.
+
+**It lost, and the refutation is more useful than the change would have been.**
+
+> *"'Instance-wide' does not imply 'System-Manager-only'. An aggregate inherits
+> the authorization scope of its input rows."*
+
+In a shop-each model the correct aggregate is `SUM(unbooked belonging to this
+shop)`. Denying every shop operator so only the instance administrator can sum
+all shops **is** an answer to step 1 — a centrally administered installation in
+which shop operators get no financial oversight — smuggled into four decorators.
+
+**The concrete breakage, and every link was checked here:**
+
+| claim | verified |
+|---|---|
+| `Sales User` is the role the terminal requires, and the visitor probe assigns it | `tools/isolation_probe.py` |
+| `charge` / `poll` accept `Sales User` | `api.py` |
+| `Sales User` already has **read, report, create, write** on `Crypto Sale` | `crypto_sale.json` permissions |
+| `Crypto Takings` authorises `Sales User` outright | `crypto_takings.json` roles |
+| both oversight number cards are `is_public=1` and call these exact endpoints | `settled_not_in_ledger_{count,value}.json` |
+| the workspace carrying them is `public=1` with **no** role restriction | `workspace/cryptopos.json` |
+
+So adding the guard would have **broken the operator's own oversight surface** —
+the cashier loses the red count and the USD warning, and the late-payment queue,
+in exactly the state those cards exist to detect (a settled sale whose invoice
+failed) — **while changing no confidentiality at all**, because the same user
+can still read every row from the `Crypto Sale` list and run Crypto Takings.
+The worst available outcome: the summary breaks, the data does not move.
+
+**The sharpening, and this is the part to keep.** D11 records that *"owner-based
+DocType rules alone cannot fix this"*. The complement is now established:
+**API-level role guards alone cannot fix it either.** The confidentiality
+boundary is not in `api.py`. `Sales User` reaches the same money three ways —
+the endpoint, the DocType list, and the report — and a guard on any one of them
+moves nothing. Step 4 is therefore not "add `only_for` to seven endpoints"; it
+is one decision (**who is the operator principal, and what scope does a shop
+have**) applied at three surfaces at once. That is genuinely step 1's question,
+and the fence is correct.
+
+**What is safe to do before step 1, and was done:** measure. `tools/api_surface.py`
+reads the surface statically — no bench, no socket — and fails while any endpoint
+exposing another party's data has no owner constraint. It enforces nothing and
+proposes no model; it turns step 4's scope from an adjective into a list.
+
+**Two architecture calls were attacked today and both of mine lost** (D36, D37).
+Both times the position was reasonable and the leg it rested on was the wrong
+one. The habit is the finding: neither loss cost anything except the argument,
+and D37's refutation would have been a live regression in a running deployment.
+
+---
+
+## D38 · `reorg_probe` cannot tell "the chain says it is gone" from "I got no answer", and has been failing on Solana since the sixth rail landed — 2026-08-28
+
+`GOAL.md` records this gate as **PASS — none missing**. It is not. Run against
+the live stack today it reported between five and nine sales with "no live
+transaction behind them", and **the set changed on every run**:
+
+```
+run 1: 00244 00260 00285 00328 00350 00351 00352      (7)
+run 2:             00257 00328 00350 00351 00352      (5)
+run 3: 00244 00256 00257 00285 00328 00350 00351 00352 (8)
+```
+
+A reorg is not intermittent. Two different defects are hiding in one number.
+
+**1. Every Solana sale is a permanent false positive, and it is a probe bug.**
+`00328`, `00350`, `00351`, `00352` are flagged in all three runs. The probe
+branches on `transport == "esplora-rest"` and sends **everything else** to
+`_evm_confirmed`. `sol`'s transport is `json-rpc` — the same string the EVM
+rails use — so a Solana signature is asked of `api.devnet.solana.com` with an
+Ethereum method. Asked both ways:
+
+```
+eth_getTransactionByHash  ->  {"error":{"code":-32601,"message":"Method not found"}}
+getTransaction            ->  FOUND — slot 487871523, blockTime 1787671388, err=None
+```
+
+The money is exactly where the ledger says it is. **This is D33/D35 for the
+third time**: the sixth rail arrived as a wheel (D31) and an independent
+consumer was never taught about it, because the fix was reasoned about as "the
+rail" rather than searched for as *every implementation of the rule*. Two
+consumers were found and repaired in that pass; this third one was not, and
+nothing compared them because `reorg_probe` needs a live stack and never runs
+in a suite.
+
+**2. The EVM sales drift in and out, because a silent endpoint reads as a
+missing transaction.** `00244`, `00256`, `00257`, `00260`, `00285` appear and
+disappear between consecutive runs with nothing on any chain changing. The
+`except` arm correctly reports *"could not ask the chain"* and skips — but that
+only catches a **raised** failure. A JSON-RPC error object, or a null result
+from a public node that pruned or simply declined, returns `known=False`, and
+the probe prints **"unknown to the node"** — wording that asserts the node
+answered.
+
+**The defect is one sentence: `missing` conflates three states.** Reorged away,
+pruned, and *nobody answered* are operationally opposite — the first is a
+correction a human must make, the third is "run it again" — and they share a
+counter and a line of output. This repository already knows the shape:
+`reconcile.py` says in its own docstring that an endpoint which does not answer
+is reported as zero found, *because* "nobody looked" and "nothing was there" are
+the same to a sweep that runs again in an hour. There the collapse is deliberate
+and written down; here it is neither, and it fails in the alarming direction —
+it tells an operator that booked money has no transaction behind it.
+
+**What this cost to find:** bringing the stack up and running the probe three
+times. One run looks like a finding about the chain. Three runs make it a
+finding about the probe. **Nothing in any suite could have caught it** — the
+probe needs a live bench, so it is outside `make check` by construction, and its
+own output has no notion of a control.
+
+**Not fixed in this entry.** The repair is a Solana branch plus a third state
+(`unreachable`, distinct from `confirmed` and `gone`) that is reported and
+excluded from `missing`. Until then, `GOAL.md`'s gate row is corrected to say
+what the probe actually reports and why the number moves.
+
+---
+
+## D39 · A rail can be agreed by all four workers and unreachable by all of them — 2026-08-28
+
+Found while verifying D38's fix, and it is the more serious of the two.
+
+`erpnext-hr/rails_agree.sh` **passes**. All four Frappe processes drive the same
+six rails and the Solana plugin is installed in every one of them. `snapshot.py`
+lists `sol` as enabled. It has settled real sales and booked real invoices.
+
+**And no container can reach the chain.** From inside `backend`:
+
+```
+api.devnet.solana.com                  -> FAILS x4  (Temporary failure in name resolution)
+api.mainnet-beta.solana.com            -> 208.115.249.134
+solana-rpc.publicnode.com              -> 104.20.24.117
+ethereum-sepolia-rpc.publicnode.com    -> 172.66.150.162
+polygon-amoy-bor-rpc.publicnode.com    -> 104.20.24.117
+mempool.space                          -> 103.165.192.204
+api.coinbase.com / google.com          -> resolve
+```
+
+From the **host**, the same name resolves fine (`208.115.212.49`). It is one
+hostname, inside the containers, persistently — four attempts, four failures,
+while a sibling `solana.com` name resolves on every try. It settled sales on
+2026-08-25, so this is a change, not a configuration that never worked.
+
+**What it would cost.** A sale charged on `sol` today is broadcast and never
+observed: it ends `needs_review` with the money gone. **That is the D31 incident
+exactly** — the one whose lesson produced `rails_agree.sh`.
+
+**And `rails_agree.sh` cannot see it.** It asks whether the four processes
+*agree about which rails they drive*. It never asks whether any of them can
+*reach* the chain. Those are different questions, and today they have different
+answers. The gate built from D31 answers the question D31 happened to raise
+rather than the one it was really about: **can this process actually settle this
+rail right now.**
+
+This is also why `reorg_probe` reports the four Solana sales `UNREACHABLE` after
+D38's fix rather than `CONFIRMED`. That classification is **correct** — the
+probe is telling the truth about what it could learn — and chasing it as a probe
+bug would have been chasing the symptom. The money is fine: asked from the host,
+`CPS-2026-00352` is on devnet at slot 487871523 with `err=None`.
+
+**Not diagnosed here, and deliberately not worked around.** Whether the cause is
+Docker's embedded resolver, an upstream DNS change, or something in the compose
+network is a deployment question. Pointing the rail row at
+`solana-rpc.publicnode.com` — which *does* resolve in the container — would make
+the symptom disappear without anyone understanding it, and would silently move
+the deployment onto a different node's view of the chain. **That is the maintainer's call.**
+
+**The gate:** `tools/reach_probe.py` — for every enabled rail, from the process
+it runs in, make a real read-only call to that rail's configured endpoint and
+exit non-zero if any cannot be reached. Run it in all four containers, for the
+same reason `rails_agree.sh` is run in all four.
+
+### D39, continued · the blast radius is wider than the rail — measured 2026-08-28
+
+`reach_probe` landed and was run in all four containers. It confirmed D39 above
+and then showed something the DNS test alone had not:
+
+```
+backend       sol UNREACHABLE                        1 of 6 unreachable
+queue-short   sol UNREACHABLE + usdc-eth UNREACHABLE 2 of 6
+queue-long    sol UNREACHABLE + eth      UNREACHABLE 2 of 6
+scheduler     sol UNREACHABLE                        1 of 6
+```
+
+Sepolia failed in two of the four processes, in a back-to-back sweep, with
+nothing wrong at Sepolia. **It does not reproduce in isolation:** running the
+same probe three times in `queue-short` alone reports exactly one unreachable
+rail — `sol` — every time.
+
+The mechanism, measured:
+
+```
+ethereum-sepolia-rpc.publicnode.com    6/6 ok, slowest 0.1s
+polygon-amoy-bor-rpc.publicnode.com    6/6 ok, slowest 0.0s
+api.devnet.solana.com                  0/6,  EIGHT SECONDS per attempt
+```
+
+Every lookup of the unresolvable host **hangs for eight seconds** before
+failing, and the containers share Docker's embedded resolver. Four processes
+each burning 8 s on the same dead name transiently starves it for everything
+else.
+
+**So one unresolvable hostname does not merely disable its own rail — it
+intermittently takes the other rails down with it.** A rail that cannot be
+reached is a contained problem; a rail that degrades the resolver is not, and
+this is a deployment whose whole watcher layer is DNS-dependent. It also means a
+`needs_review` on `eth` or `usdc-pol` may have nothing to do with Ethereum or
+Polygon.
+
+**Two things follow, and neither is mine to decide.** Repointing `sol` at a host
+that resolves would fix both symptoms at once — and would still be moving the
+deployment onto a different node's view of the chain without anyone
+understanding the original cause. Disabling the rail removes the starvation
+without pretending the rail works. Both are the maintainer's.
+
+**What is not in doubt:** `sol` cannot be watched from this deployment right
+now, and `rails_agree.sh` says everything is fine.
+
+---
+
+## D40 · The spend guard now has a third door, and the remedy for D39 was confirmed without taking it — 2026-08-28
+
+`prove_end_to_end.py` is the only check here that spends real money. It already
+refused for two reasons: the four workers disagree about which rails they drive
+(D31), and the payer cannot fund the rail (it calls `runway.capacity`, the same
+function the report calls, deliberately not a second copy). D39 showed a third
+door standing open — **agreement is not reachability** — so it now runs
+`reach_probe` in all four containers for the rail about to be charged, and
+refuses before anything is broadcast.
+
+It reuses the probe rather than reimplementing the check, for the reason this
+register keeps recording: two implementations of one question is how D33, D35
+and D38 happened.
+
+**It had to ask the containers, not the host.** That is the whole content of
+D39 — `api.devnet.solana.com` resolves on the host and not in the containers, so
+a host-side reachability check would have passed and been worthless.
+
+**Three live checks, run here because Codex's sandbox has no Docker and it said
+so rather than claiming otherwise:**
+
+| check | result |
+|---|---|
+| `--rail sol` (dry) | **REFUSES**, exit 1, all four workers report the rail unreachable |
+| `--rail eth` (dry) | passes, all four REACHABLE, proceeds to describe what it would charge |
+| same rail, endpoint overridden **in memory** to `solana-rpc.publicnode.com` | **REACHABLE from all four** |
+
+The third is the control: the same rail, with nothing changed but the endpoint,
+in a process that writes nothing — so the guard is driven by reachability and
+not by something incidental to `sol`.
+
+**And it answers D39's open remedy without taking it.** Repointing the rail row
+*would* work; that is now measured rather than assumed. It is still not done,
+because it relocates the deployment onto a different node's view of the chain
+and buries the cause. **What was gained is that the maintainer now chooses between two
+remedies whose outcomes are both known, instead of between a known and a guess.**
+
+**One defect found in the guard by reading its own output**, and it is this
+repository's signature shape. On the refusal path it printed a second line:
+
+```
+sol  UNREACHABLE — probe process failure: <frozen site>:101: RuntimeWarning: ...
+```
+
+No process failed. The container prints two harmless `RuntimeWarning`s on every
+invocation, and the branch fires whenever the probe legitimately exits non-zero
+*and* anything is on stderr. The condition is true and the sentence is false —
+D25 and D38 again — and it appears **only** when a rail is genuinely unreachable,
+which is exactly when someone is reading carefully. It sends them after a Python
+environment problem while the finding is a hostname that does not resolve.
+
+### D40, continued · the false message is fixed, and the distinction now holds both ways
+
+Verified live here, all three cases:
+
+| case | result |
+|---|---|
+| `--rail sol` — genuinely unreachable | four honest `DNS failure` lines, **no** "process failure", refuses, exit 1 |
+| container name pointed at something that does not exist | `probe process failure: No such container` — still reported as one, refuses |
+| `--rail eth` — healthy | all four `REACHABLE`, proceeds, exit 0 |
+
+The rule the fix encodes: **a non-zero exit from the probe is the probe
+answering, not the probe failing.** "Process failure" is now reserved for the
+case where it could not run or produced no usable answer, and other stderr
+surfaces as `probe diagnostic (stderr)` rather than as a second verdict — so a
+diagnostic can never again masquerade as a cause.
+
+Worth keeping as the general form, because this register has now recorded it
+four times (D25, D38, D39, D40): **when a guard prints a reason, ask what else
+satisfies the condition it printed it from.** Every one of these defects was a
+true condition attached to a false sentence, and all four were invisible to
+every suite.
+
+---
+
+## D41 · `reorg_probe` answers block *identity*, not block existence — and the header cache it was meant to copy was rejected — 2026-08-29
+
+D38 left the repair unwritten: "a Solana branch plus a third state
+(`unreachable`, distinct from `confirmed` and `gone`)". Both landed. This entry
+is what came after, when the probe was asked a harder question: *is every booked
+sale still backed by the chain?*
+
+**The proposal was Tari's.** `minotari_payment_processor`'s
+`confirmation_checker` keeps the last 2000 block headers as
+`(height, header_hash, prev_hash)`, compares each new tip's `prev_hash` to the
+stored tip, walks back to a common ancestor on mismatch, and reverts the
+affected batches. the maintainer asked for that design. Codex was asked to attack it and
+**the attack won.** Three of its findings were reproduced here before anything
+was built:
+
+> "A cache keyed only by rail silently compares those views and labels their
+> difference a reorg… Calling the result 'the chain' would repeat D35's property
+> laundering. It is an endpoint-observation log."
+
+> "The empty cache stores `B102` as the transaction's first-seen placement and
+> reports `CONFIRMED`. The re-mine has been permanently erased from the probe's
+> history… A detector whose evidence disappears on routine deployment is not an
+> audit trail."
+
+That is D39's own reasoning — an endpoint is one node's view, not the chain —
+plus this repository's rule that a check must not derive its expectation from
+the thing that can break. And the four containers have four filesystems (D31),
+so four caches would hold four histories of one sale.
+
+**What survives from the Tari design is the part that needs no cache.** Compare
+a transaction's containing-block identity against the canonical block at that
+height, freshly, every run:
+
+| rail | identity | canonical comparison |
+|---|---|---|
+| EVM | receipt `blockNumber` / `blockHash` | `eth_getBlockByNumber(n).hash`, plus depth and `finalized` membership |
+| bitcoin | `/tx/{id}/status` `block_height` / `block_hash` | `/block-height/{h}`, plus `tip - height + 1` |
+| solana | `getTransaction.slot` | `confirmationStatus == finalized`; **no invented slot depth** |
+
+A `status: 0x1` receipt whose `blockHash` is not the canonical hash at its
+height read CONFIRMED before. It reads REMINED now.
+
+**A defect D38 never named.** `watch.py:55-63` says a settlement can credit
+several transactions, stores them all in `watch_scratch`'s `settled_tx_ids`, and
+calls `tx_id` merely "the one a human quotes". The probe read only `tx_id`. So
+did `tools/settled_capture.py`, and that is noted in its source rather than
+fixed. Measured on this instance: 29 sales carry a `tx_id`, **0 are
+multi-transaction today**, and 16 have no `settled_tx_ids` at all because they
+predate the convention — so it is a blind spot, not a live false positive, and
+an absent scratch must fall back while a *corrupt* one must refuse.
+
+**Then the finished implementation was attacked, and seven findings survived
+reproduction.** The two that mattered:
+
+*A run that proves nothing exited green.* 29 sales, 7 unanswered, and it printed
+"no usable chain answer says a sale is under-backed" and exited 0. Keeping
+UNREACHABLE out of GONE is right and is D38; exiting 0 having proved the claim
+for 22 of 29 is not. **An unproven universal is not true.** The exit code is now
+three-valued: 0 proven, 1 actionable, 2 inconclusive.
+
+*The Solana SHALLOW branch was dead code.* Reproduced live on devnet:
+
+```
+processed slot 489729498, finalized 489729468, gap 30 slots
+getTransaction (no commitment)        -> null
+getTransaction (commitment=confirmed) -> OBJECT
+getSignatureStatuses                  -> "confirmed"
+```
+
+`getTransaction` defaults to *finalized* commitment, so a confirmed-but-not-yet-
+finalized transaction returns null, becomes UNREACHABLE, and never reaches
+`getSignatureStatuses`. Combined with the first finding, that sale read green.
+The harness passed because its fixture supplied an answer the real API would not
+give. **This is D19's shape: a green check over a path that cannot execute.**
+
+The other five: the probe reimplemented `gate_for(mode)` and `endpoint_for(mode)`
+which the DocType already owns and `charge.py`, `watch.py` and `catalog.py`
+already use — a fourth copy of one rule, so a mainnet sale would have been
+checked against the testnet chain; the population filter was `tx_id is set`
+rather than booked, hiding booked sales with no `tx_id`; GONE was outranked by
+REMINED, so a 404 hid behind a hash mismatch; a corrupt `watch_scratch` fell
+back silently; and the EVM receipt was never checked to be the receipt asked
+for.
+
+**The structural change is that this is no longer outside `make check`.** D38
+said the probe "needs a live bench, so it is outside `make check` by
+construction", and that is exactly why the Solana bug survived. The logic now
+lives in `tools/reorg_probe_core.py` with an injected transport and no `frappe`
+import at module level; `tools/h_reorg_probe.py` drives it from recorded
+answers with no socket and no bench; and `make reorg` is part of `make check`.
+**30 checks, 14 mutation modes, every one seen red.** Three defects injected
+*outside* the mutation switches were each caught — nulling `_evm_canonical_hash`,
+truncating `settled_transaction_ids`, adding UNREACHABLE to `ACTIONABLE_STATES`
+— so the harness is not self-confirming.
+
+**Persistence survives in one honest form.** `--journal PATH`, off by default,
+appends one observation per (sale, transaction) and **decides nothing**. Proven
+live: tampering a journalled block hash printed
+`RE-MINED (journal evidence) … observation-vs-observation … live state remains
+BACKED`, with REMINED still 0 and exit still 0. The journal records; it never
+supplies an expectation.
+
+**Two judgment calls, resolved rather than left open.**
+
+`SHALLOW` counts toward the exit status. The probe takes its threshold from
+`rail.gate_for(mode)` — the *same* function settlement uses at `watch.py:253` —
+so a booked sale reading SHALLOW means its depth fell below the gate that
+authorised the booking. That can only happen through a reorg. It is actionable.
+
+**A repeat, and where it belongs (2026-08-30).** A transport-level retry was
+built first and **never fired**, because the failure this probe actually suffers
+is `{"result": null}` — a successful HTTP read the transport never sees. The
+repeat now wraps the whole classification, which is where silence becomes a
+verdict, and it is bounded, counted, and printed: *"endpoint health: 5 read(s)
+needed a second attempt. The verdicts above stand; this counts the endpoint, not
+the chain."* It can only improve UNREACHABLE — GONE, REMINED, SHALLOW and BACKED
+are answers and are returned the first time they are given, which is pinned by
+four checks. On the run that measured it the repeats did **not** rescue the
+count: 12 UNREACHABLE before and after, 5 second attempts, all still silent.
+That is the honest outcome and the reason the counter is printed.
+
+**Where it stands live:** 29 sales, 17 BACKED, 0 SHALLOW, 0 REMINED, 0 GONE,
+12 UNREACHABLE, exit 2. Four of the twelve are `sol`, unreachable inside the
+containers for D39's reason and not this probe's. See D38, D39, D15, D33, D35.
+
+---
+
+## D42 · The EVM rails can bind a payment to a sale — 2026-08-29
+
+D5 ended with an order: *"Per-sale addresses for them need BIP-44 + keccak,
+which `hd.py` does not have; that is the next order on this line."* This is that
+order, and the reason it was taken now is that a counter-argument said so.
+
+**The question that produced it.** The proposal on the table was node quorum —
+settlement facts decided by several independent endpoints instead of one. Codex
+was asked to attack it and rejected it outright:
+
+> "Single-node trust is not the largest live safety hole. Payment attribution
+> is. The current EVM rails can unanimously and honestly settle the wrong sale;
+> quorum would merely give that mistake multiple signatures."
+
+Reproduced against the code before accepting it. `settle()` credits every
+timely, unclaimed transfer to the recipient, and the baseline is a block height,
+not a binding. So a transaction broadcast for sale A and confirmed after A
+expired is unclaimed, timely and sufficient for sale B — whose customer sent
+nothing. **Every honest node reports that identically**, which is exactly why
+more nodes buy nothing.
+
+**What was built.** `hd.evm_address()` takes an account xpub child to an EIP-55
+address: uncompressed point, x and y as 32 bytes each, keccak256, last 20 bytes.
+`cryptopos/catalog.py` picks the address builder by family from
+`_ADDRESS_BUILDERS`, and `DERIVING_FAMILIES` is derived from that same dict so
+the two cannot drift. The row lock that serialises allocation, the index
+advance and the refusals were already family-agnostic — `btc` had paid for the
+hard part in D7.
+
+**One implementation of the checksum rule.** `addresses.to_eip55()` is shared by
+`hd.evm_address` and the existing `_check_evm` verifier. D33 and D35 are both
+"one rule, several implementations, one of them got fixed".
+
+**Guards, each of which refuses rather than guesses.** An EVM rail refuses
+tpub/zpub/vpub and a Bitcoin rail refuses mainnet xpub bytes — SLIP-132 assigns
+zpub/vpub to Bitcoin P2WPKH, and deriving an EVM address from them would send
+money nowhere. The key must be account-level at depth 3. And two rails may not
+share one account key, because they would derive the same address from the same
+index and show two customers one address.
+
+**Verified independently, not from the builder's report.** `keccak256` against
+three published vectors. The EIP-55 encoder against four vectors fetched from
+the EIP-55 page *and* against an encoder written separately from the spec's
+wording. The derivation against a secp256k1 decompression written from the curve
+equation rather than reusing `hd.py`'s point maths — five distinct addresses
+from BIP-32 test vector 1, deterministic, every one passing the library's own
+validator. The wrong-family guard against the repository's real harness key: it
+still derives `tb1qjmalnk7asntx02x2r3e30x0p7h3rsc2rs9hvrg` on the Bitcoin path
+and `evm_address` refuses it. `make check` green — 100% line coverage,
+2096/2107 mutants killed, 3.9/3.11/3.13/3.14. App harness **85/85**, up from 78.
+
+> **The first attempt to test the version-byte guard was worthless.** A `vpub`
+> was invented for it and died at the checksum, so nothing was exercised. It is
+> the workspace's own rule — a model cannot produce a long base58 string
+> reliably, and a wrong one does not look wrong. Retested with the real key.
+
+**THE DEPLOYMENT IS STILL SHARED.** All four EVM rails carry a
+`testnet_recipient` and no xpub, so nothing changes until an operator configures
+an account xpub they control. That is not free: money then lands across many
+addresses, and `sweep_evm.py`, `harnesses/live_funds.py`, `wallets.py`,
+`gui.py` and `pos_actions.py` all assume a single merchant address. They were
+listed and deliberately not changed — the back-office half is its own order.
+
+See D5, D7, D20, D33, D35.
+
+---
+
+## D43 · A required field on a published plugin protocol is a breaking change — 2026-08-29
+
+`api.rails` computed the operator-facing binding as `"per-sale" if derives else
+"shared"`, where `derives` meant only "this rail has an xpub". So one row said
+both things at once:
+
+```
+{'name': 'sol', 'binding': 'shared',
+ 'maturity_note': "... Binding: Solana Pay reference -- only this sale's money
+                   touches it."}
+```
+
+The app was inferring a property the library already declared, and inferring it
+wrong — D33/D35/D38's pattern, and the surface D33 calls the worst kind: one
+telling an operator the opposite of the truth. The fix was to have the library
+declare a *category* and the app read it.
+
+**Making that field required broke every already-installed plugin.** The app
+harness, 82/82 an hour earlier, died:
+
+```
+Rail sol names solana:devnet/native:sol, which this deployment knows about and
+cannot drive ... It can be described and it cannot be charged.
+```
+
+Confirmed inside the backend container:
+
+```
+installed from: .../site-packages/cryptopos_rail_solana/__init__.py
+version: 0.1.0
+declares binding_category: False
+```
+
+A rail that has settled real money and booked real invoices became undriveable,
+and per D31 it would have done so in all four Python environments.
+
+**Nothing caught it, and the reason is the point.** The unit suite was green
+throughout — 615/615 core, 23/23 plugin, 100% line coverage, full mutation —
+because it exercises the plugin **source in this repository**. The deployment
+imports the **installed wheel**. This is D31's incident caused by a protocol
+change rather than a missed install, and D19's shape again: every suite green
+while the deployment cannot take a payment. It was found by running the live
+harness after a green `make check`, which is the only thing that could have
+found it.
+
+**The rule.** A published plugin protocol may not gain a required field. Make it
+optional with a **pessimistic** default, so absence is both backward compatible
+and fails in the safe direction. `binding_category_for()` uses
+`getattr(rail, "binding_category", NOT_UNCONDITIONAL)`: an undeclared binding is
+reported weaker than it may be, because understating a binding is conservative
+while overstating one tells an operator a payment is bound to a sale when it may
+not be.
+
+`catalog.declared_binding_category()` then resolves in an order worth keeping:
+an explicit plugin value is authoritative; an older plugin with no field
+inherits the matching **built-in concrete rail's** declaration, matched by
+catalog key and never by an editable row name; otherwise the pessimistic default
+stands.
+
+**The control needs no injection.** The installed 0.1.0 plugin still declares
+nothing, still drives, and reads `not-unconditional`. And the check that the
+category is read rather than inferred was seen red: reinstating the old
+derivation-only rule turns the harness to *"FAIL Solana reports its
+reference-bound payments as per-sale"*, 84 passed 1 failed.
+
+See D31, D19, D33, D35, D38.
+
+---
+
+## D44 · Sepolia cannot be made reorg-safe under the rate lock — measured, 2026-08-29
+
+D15 records that `eth` and `usdc-eth` settle at three confirmations and can
+therefore be false-booked by a reorg. The obvious remedy is the one the Amoy
+subclass in the same file already uses: settle only at or below the `finalized`
+block tag, which cannot be rolled back. `EthereumSepoliaRail._is_mature` is
+`observations.tip - transfer.block_height + 1 >= 3`; `PolygonAmoyRail._is_mature`
+is `transfer.block_height <= observations.finalized_tip`. The safe mechanism is
+already written, already tested, and already running on the neighbouring rail.
+
+**It cannot be applied to Sepolia.** Measured against the live chains:
+
+```
+sepolia  tip=11593688 finalized=11593606  lag = 82 blocks = 1020s = 17.0 min
+amoy     tip=46211099 finalized=46211098  lag =  1 block  =    1s
+```
+
+`RATE_LOCK_SECONDS` is 15 minutes. Moving Sepolia to the finalized tag puts
+settlement **beyond the lock**, which is D11's failure mode exactly: an honest,
+immediately-paid sale fails permanently because the gate is slower than the
+window. D12 already attacked and rejected simply making the lock longer — it is
+not two windows, it is one longer price lock, and settlement cannot tell an
+early broadcast from a late one.
+
+**So the three-confirmation exposure on the two Sepolia rails is structural.**
+It is a property of that chain against this product's timing, not an oversight
+in the adapter, and no amount of care in `_is_mature` removes it. `GOAL.md`
+already carried a finality figure of 14.0–18.6 minutes for `ethereum:sepolia`;
+this measurement lands inside it and turns a range into a decision.
+
+**What it means for a business rather than a demo.** Polygon-class rails can be
+both fast and final — Amoy pays *one second* for a gate that cannot be reorged,
+which is why it takes the safe rule for free and why D18 was able to overturn
+the timing conclusion of D11–D17. Ethereum L1 cannot be both, at a till. A
+deployment that wants reorg-safe settlement without a 17-minute wait should
+prefer the Polygon-class rails and treat `eth` as the demonstration rail it is.
+
+`tools/reorg_probe` is what makes the residual exposure visible rather than
+theoretical: it reports each booked sale's live depth and whether its containing
+block is still canonical (D41). It does not remove the exposure and cannot.
+
+See D11, D12, D15, D18, D41.
+
+---
+
+## D45 · A binding category is a claim about an adapter, not about a chain — 2026-08-30
+
+D43 gave the library a `binding_category` so the app would stop inferring how a
+payment binds. The first assignment was wrong, and it was wrong in a way worth
+writing down, because the mistake is the natural one.
+
+Four rails were declared `unconditional-per-sale`: `sol`, `usdc-sol`, `xmr`,
+`xtm`. `usdc-sol` was corrected first, on the narrow ground that its own prose
+says *"amount read from token balance deltas"* — the mechanism D33 proved is
+"a race deciding which sale steals the money, not attribution". The remaining
+question was put to Codex as a position: that the category is a fact about a
+rail's **protocol mechanism**, so `xmr` and `xtm` may claim it unimplemented,
+while `usdc-sol` may not.
+
+**Codex found the position internally inconsistent, and it was right:**
+
+> "For `xmr` and `xtm`, it classifies an ideal future implementation that
+> allocates fresh identities correctly. For `usdc-sol`, it classifies one
+> hypothetical bad implementation that reads balance deltas. That asymmetry —
+> not implementation maturity — is the defect."
+
+It is a real dilemma. Under the protocol reading `usdc-sol` *qualifies*, because
+Solana Pay puts reference keys directly on `TokenProgram.Transfer`, so a future
+adapter could decode the instruction exactly as the corrected SOL adapter
+decodes System transfers. Under the mechanism reading `xmr` and `xtm` fail,
+because freshness is adapter behaviour and nothing enforces it.
+
+**Two claims were reproduced here before the position was abandoned:**
+
+* `RequestRail.create_request` attaches a per-sale reference for `sol` and
+  `usdc-sol` **and nothing else**. `uri.py` emits `tari://…?tariAddress={address}`
+  and `monero:{address}?tx_amount=` — the recipient the operator configured,
+  unchanged. So `xtm` and `xmr` have **no per-sale identity at all** in this
+  codebase. A payment_id binds money to the id; it does not bind the id to a
+  sale, and it is optional, arbitrary and not required to be unique.
+* The overclaim is not inert. `catalog.declared_binding_category` lends a
+  built-in declaration to any installed plugin that declares none, and three
+  operator-facing surfaces print the result: `api.rails`, `tools/rails_probe`
+  and `tools/snapshot` (which says `per-sale(claimed)`). A plugin using a static
+  recipient would inherit "per-sale" and be shown as safely bound.
+
+**The resolution.** A rail may claim an unconditional per-sale binding only when
+two things are true **in code**: it gives each sale an identity of its own, and
+its observer attributes the amount to the thing carrying that identity. D33 is
+the proof that both halves are needed — Solana Pay's reference was a sound
+protocol mechanism the whole time, and the rail still credited the wrong sale
+until the adapter decoded the instruction. **A chain that could bind per sale has
+not bound anything.**
+
+So exactly one built-in rail claims it: `sol`. `xmr`, `xtm` and `usdc-sol`
+declare `not-unconditional`, and each carries the reason in the table beside it.
+The claim becomes true in the plugin that implements it, declared there, where
+the code that makes it true lives — and `binding_category_for`'s pessimistic
+default (D43) means an old plugin that says nothing is understated rather than
+overstated.
+
+**Pinned by rules rather than by a list**, both seen red:
+
+* a rail declaring `unconditional-per-sale` must be in `catalog.REFERENCE_RAILS`
+  — *"xmr claims a per-sale binding with no per-sale identity to bind to"*;
+* a rail whose binding prose describes a balance delta may not claim one —
+  *"usdc-sol credits a balance delta yet claims an unconditional binding"*.
+
+`REFERENCE_RAILS` was named for this: the set was an inline tuple inside
+`create_request`, so the invariant could only have been checked against a
+hand-kept list, which is the kind of table this workspace has been bitten by.
+
+See D33, D43, D5.

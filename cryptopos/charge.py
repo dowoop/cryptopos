@@ -10,13 +10,11 @@ receipt reprinted next month has to say what the customer was handed.
 
 import json
 import secrets
-
 from zoneinfo import ZoneInfo
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, now_datetime
-from frappe.utils import get_system_timezone
+from frappe.utils import add_to_date, get_system_timezone, now_datetime
 
 from cryptopos import catalog, rates
 from cryptopos_core import qr
@@ -77,6 +75,52 @@ def _intent_id(sale_reference):
 	plugin contract's identifier grammar is lowercase ASCII.
 	"""
 	return sale_reference.lower()
+
+
+def _scale_of(rail, adapter):
+	"""The two numbers the amount math needs, taken from THIS deployment's row.
+
+	`invoice_amount` and `usd_cents_to_native` read exactly `native_decimals`
+	and `display_decimals` and nothing else, and the `Crypto Rail` row carries
+	both -- `install.py` seeds them from the frozen table, and all five enabled
+	rails were verified identical before this stopped reading that table.
+
+	It used to be `_core_rails.rail_for(rail.rail_key)`, which knows twelve rail
+	keys and raises a bare `KeyError` for a thirteenth. That made an operator's
+	own rail row un-chargeable with a traceback rather than a sentence, and it
+	was a split brain besides: the very next line of this function already
+	prices its error message from `rail.unit_name`, the row. One source now.
+
+	The row is validated by its own DocType, so this asserts only what that
+	cannot: that the scales are ordered, because a display precision finer than
+	the chain's own would ask a customer for an amount no URI can state, and
+	that the row agrees with the adapter that will watch for the money.
+
+	**That second check is the price of trusting the row.** The frozen table
+	could not be edited by an operator; a DocType row can. A row claiming 6
+	native decimals in front of an 18-decimal adapter would invoice a millionth
+	of the intended amount and settle it as paid in full, and every arithmetic
+	assertion in this codebase would agree, because they would all be reading
+	the same wrong number.
+	"""
+	native = int(rail.native_decimals or 0)
+	display = int(rail.display_decimals or 0)
+	chain_native = getattr(getattr(adapter, "asset", None), "decimals", None)
+	if chain_native is not None and native != int(chain_native):
+		frappe.throw(
+			_("{0} says {1} native decimals; the {2} adapter says {3}. "
+			  "One of them is wrong and this refuses rather than guess.").format(
+				rail.label or rail.rail_key, native, adapter.key, chain_native),
+			title=_("Rail scale disagrees with its adapter"),
+		)
+	if native < 0 or display < 0 or display > native:
+		frappe.throw(
+			_("{0} declares {1} native decimals and {2} display decimals. "
+			  "Display precision cannot be finer than the chain's own.").format(
+				rail.label or rail.rail_key, native, display),
+			title=_("Rail scale is impossible"),
+		)
+	return {"native_decimals": native, "display_decimals": display}
 
 
 def charge(usd_cents, rail_key, loyalty_account=""):
@@ -154,7 +198,7 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 	# is exactly what the payment request will say.
 	try:
 		invoiced_native = _core_rails.invoice_amount(
-			_core_rails.rail_for(rail.rail_key), usd_cents, rate_microcents
+			_scale_of(rail, adapter), usd_cents, rate_microcents
 		)
 	except CryptoPosError as exception:
 		frappe.throw(str(exception), title=_("Cannot invoice this amount"))
@@ -222,6 +266,13 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 					"endpoint": endpoint,
 					"gate": rail.gate_for(mode),
 					"catalog_key": adapter.key,
+					# WHICH IMPLEMENTATION, not just which money. `catalog_key`
+					# names one asset on one chain; it does not name the code
+					# that attributes and settles payments on it, and a rail
+					# plugin can be replaced under a key that never changes.
+					# The watcher compares this before it trusts an
+					# observation -- see DECISIONS.md D30.
+					"adapter": catalog.adapter_identity(adapter.key),
 					"intent": catalog.intent_to_record(intent),
 					"payer_notice": request.payer_notice,
 				}

@@ -3,6 +3,7 @@
 import unittest
 from unittest import mock
 
+from cryptopos_core import plugin as plugin_module
 from cryptopos_core.errors import DuplicateRail, InvalidAmount, InvalidRailPlugin, RailNotInstalled
 from cryptopos_core.plugin import (
 	ADDRESS_VALIDATION,
@@ -24,6 +25,7 @@ from cryptopos_core.registry import RailRegistry
 
 
 class ExampleRail:
+	binding_category = "unconditional-per-sale"
 	network = Network("example", "testnet-1", True)
 	asset = Asset("slip44", "999", "TST", 6)
 	key = f"{network.key}/{asset.key}"
@@ -61,6 +63,16 @@ class ExampleRail:
 
 	def settle(self, intent, observations, claimed_transaction_ids=frozenset()):
 		return SettlementDecision(SETTLED, intent.amount_native, intent.amount_native, ("tx",))
+
+
+def legacy_rail():
+	"""The published PaymentRail shape before binding categories existed."""
+	attributes = {
+		name: value
+		for name, value in vars(ExampleRail).items()
+		if not name.startswith("__") and name != "binding_category"
+	}
+	return type("LegacyRail", (), attributes)()
 
 
 class Identity(unittest.TestCase):
@@ -208,6 +220,33 @@ class Registry(unittest.TestCase):
 			plugin.capabilities = capabilities
 			with self.subTest(key=key, capabilities=capabilities), self.assertRaises(InvalidRailPlugin):
 				RailRegistry().register(plugin)
+
+	def test_unknown_binding_category_is_refused(self):
+		for category in ("probably-per-sale", True):
+			plugin = ExampleRail()
+			plugin.binding_category = category
+			with self.subTest(category=category), self.assertRaises(InvalidRailPlugin):
+				RailRegistry().register(plugin)
+
+	def test_a_published_plugin_without_the_new_field_stays_driveable_and_defaults_safely(self):
+		legacy = legacy_rail()
+		registry = RailRegistry()
+		self.assertIs(registry.register(legacy), legacy)
+		self.assertEqual(plugin_module.binding_category_for(legacy), "not-unconditional")
+
+	def test_discovery_accepts_a_published_plugin_without_the_new_field(self):
+		legacy = legacy_rail()
+
+		class Point:
+			def load(self):
+				return legacy
+
+		class Points:
+			def select(self, **selection):
+				return (Point(),)
+
+		with mock.patch("importlib.metadata.entry_points", return_value=Points()):
+			self.assertIs(RailRegistry().discover()[0], legacy)
 
 	def test_discovery_loads_an_installed_plugin(self):
 		class Point:

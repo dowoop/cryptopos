@@ -21,7 +21,6 @@ the user again. It writes nothing else and changes no sale.
 
 import frappe
 
-
 PROBE_USER = "isolation-probe@example.invalid"
 
 

@@ -32,7 +32,6 @@ import statistics
 import sys
 import urllib.request
 
-
 DEFAULT_API = "https://mempool.space/testnet4/api"
 
 # The endpoints install.py seeds, so the tool measures what the terminal

@@ -91,6 +91,34 @@ def _claimed_transaction_ids(sale):
 	return frozenset(identifier for identifier in claimed if identifier)
 
 
+def _unbindable_reason(rail, sighted, gate):
+	"""Why money sitting at this address is not booked, in terms this rail earns.
+
+	A rail that derives a fresh address per sale (D7) **can** prove the money is
+	this sale's: the address exists for no other purpose and no other sale will
+	ever be given it. Telling that operator the payment "is not provably this
+	customer's" is not a hedge, it is false -- and false in the direction that
+	makes them distrust the one binding in this deployment that actually works.
+
+	A rail receiving at a shared address cannot make that claim (D5), and for it
+	the original wording is exactly right. So the sentence follows the binding.
+	"""
+	if (getattr(rail, "testnet_xpub", "") or "").strip():
+		gate_text = f"{gate} confirmation{'' if gate == 1 else 's'}" if gate else "its settlement gate"
+		return (
+			f"{sighted} arrived at this sale's own address. This address was "
+			f"derived for this sale and for nothing else, so the money IS this "
+			f"customer's payment. What it did not do is reach {gate_text} before "
+			f"the rate lock ran out. Once the transaction confirms it can be "
+			f"booked by hand against this sale, and against no other."
+		)
+	return (
+		f"{sighted} arrived at this address inside the window but could not be "
+		f"tied to this sale. It is real money and it is not provably this "
+		f"customer's payment."
+	)
+
+
 def _pending_state(batch, gate):
 	"""Which in-flight state an incomplete payment is in, for the screen.
 
@@ -124,6 +152,20 @@ def poll(sale_name):
 	# fell on.
 	try:
 		adapter = catalog.plugin_for(rail)
+		# The implementation this sale was charged under. A rail plugin can be
+		# uninstalled and a different one installed under the same catalog key
+		# -- the key names the money, not the code -- and the replacement would
+		# otherwise reinterpret a baseline it did not capture and settle a
+		# payment the original would have refused. Older sales carry no stamp
+		# and are left alone; there is nothing to compare them against, and
+		# refusing them would strand money over a field that did not exist.
+		charged_under = extras.get("adapter")
+		running = catalog.adapter_identity(adapter.key)
+		if charged_under and charged_under != running:
+			raise RuntimeError(
+				f"this sale was charged under {charged_under} and this process "
+				f"is running {running}. A different implementation of "
+				f"{adapter.key} must not settle an intent it did not create.")
 		intent = catalog.intent_from_record(extras.get("intent"))
 	except Exception as exception:
 		intent = None
@@ -237,11 +279,7 @@ def poll(sale_name):
 			end_kind="unidentified",
 			review_reason=(
 				decision.reason
-				or (
-					f"{decision.sighted_native} arrived at this address inside the "
-					"window but could not be tied to this sale. It is real money "
-					"and it is not provably this customer's payment."
-				)
+				or _unbindable_reason(rail, decision.sighted_native, gate)
 			),
 		)
 
@@ -261,10 +299,8 @@ def poll(sale_name):
 					source=source,
 					detail=f"sighted {decision.sighted_native}, none bindable",
 					end_kind="unidentified",
-					review_reason=(
-						f"{decision.sighted_native} arrived at this address inside "
-						"the window but could not be tied to this sale. It is real "
-						"money and it is not provably this customer's payment."
+					review_reason=_unbindable_reason(
+						rail, decision.sighted_native, gate
 					),
 				)
 			else:

@@ -9,7 +9,7 @@ they fail on the day someone adds a rail that quietly breaks one.
 
 import unittest
 
-from cryptopos_core import rails, rates
+from cryptopos_core import catalog, rails, rates
 from cryptopos_core.errors import InvalidAmount, InvalidMode, InvalidRate
 
 # Every rail must carry these. A surface reads whichever answers its own
@@ -26,6 +26,7 @@ REQUIRED = (
 	"gate_confs",
 	"gate_text",
 	"binding",
+	"binding_category",
 	"maturity",
 	"maturity_note",
 	"live_url",
@@ -116,6 +117,65 @@ class TableShape(unittest.TestCase):
 		for key, rail in rails.RAILS.items():
 			with self.subTest(rail=key):
 				self.assertTrue(rail["binding"].strip())
+
+	def test_a_balance_delta_is_never_an_unconditional_binding(self):
+		"""D33: crediting a balance delta because a reference was seen is a race.
+
+		`sol` may claim an unconditional per-sale binding because its adapter
+		decodes the transfer instruction. A rail whose own prose says the
+		amount comes from a balance delta has not earned that claim, and the
+		claim is not inert: `declared_binding_category` hands a built-in rail's
+		value to any installed plugin that declares none.
+		"""
+		for key, rail in rails.RAILS.items():
+			prose = rail["binding"].lower()
+			if "balance delta" in prose or "balance deltas" in prose:
+				with self.subTest(rail=key):
+					self.assertEqual(
+						rail["binding_category"],
+						"not-unconditional",
+						f"{key} credits a balance delta yet claims an unconditional binding",
+					)
+
+	def test_only_a_rail_with_a_per_sale_identity_may_claim_one(self):
+		"""The category is a claim about an adapter, and D33 is why.
+
+		Solana Pay's reference was a sound protocol mechanism the whole time,
+		and the rail still credited the wrong sale until the adapter decoded
+		the transfer instruction. So a chain that *could* bind per sale has not
+		bound anything. A rail may only claim an unconditional binding if this
+		package actually gives each sale an identity of its own -- which is
+		`catalog.REFERENCE_RAILS`. It matters because
+		`declared_binding_category` lends a built-in claim to any plugin that
+		declares none, and three operator-facing surfaces print it.
+		"""
+		for key, rail in rails.RAILS.items():
+			if rail["binding_category"] == "unconditional-per-sale":
+				with self.subTest(rail=key):
+					self.assertIn(
+						key,
+						catalog.REFERENCE_RAILS,
+						f"{key} claims a per-sale binding with no per-sale identity to bind to",
+					)
+
+	def test_binding_categories_state_what_holds_without_address_derivation(self):
+		self.assertEqual(
+			{key: rail["binding_category"] for key, rail in rails.RAILS.items()},
+			{
+				"btc": "not-unconditional",
+				"eth": "not-unconditional",
+				"usdc-eth": "not-unconditional",
+				"pol": "not-unconditional",
+				"usdc-pol": "not-unconditional",
+				"sol": "unconditional-per-sale",
+				"usdc-sol": "not-unconditional",
+				"xmr": "not-unconditional",
+				"xtm": "not-unconditional",
+				"xtr": "not-unconditional",
+				"dash": "not-unconditional",
+				"zec": "not-unconditional",
+			},
+		)
 
 
 class Decimals(unittest.TestCase):

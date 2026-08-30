@@ -54,10 +54,10 @@ const EQUIVALENT = {
 	// amounts are strings of decimal digits. A decimal-digit string is zero in
 	// base 11 exactly when it is zero in base 10, so the radix cannot change
 	// the predicate. The parsed VALUE is never displayed -- the raw string is.
-	"391:10 -> 11": "radix cannot change a `> 0` test on a decimal-digit string",
+	"426:10 -> 11": "radix cannot change a `> 0` test on a decimal-digit string",
 	// `row[row.length]` is undefined, and `undefined === "1"` is false, so the
 	// extra iteration appends no module and draws nothing.
-	"585:< -> <=": "one iteration past the end reads undefined and draws nothing",
+	"620:< -> <=": "one iteration past the end reads undefined and draws nothing",
 };
 
 // ---------------------------------------------------------------------------

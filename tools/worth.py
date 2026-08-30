@@ -112,7 +112,7 @@ EQUIVALENT = {
 	# `ObservationBatch.extend` refuses if either operand carries an
 	# unattributed balance snapshot, so both values are necessarily zero here.
 	# Adding or subtracting zero produces the same cumulative batch.
-	"plugin.py:370:Add -> Sub": "both amounts are guarded to zero before they are combined",
+	"plugin.py:379:Add -> Sub": "both amounts are guarded to zero before they are combined",
 	# A minimally valid ERC-20 log is over 200 JSON bytes. Twenty thousand of
 	# them cannot fit through the four-megabyte `_rpc` response ceiling, so the
 	# parser's exact 20,000/20,001 boundary is unreachable after the wire bound.

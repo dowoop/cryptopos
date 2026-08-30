@@ -1,0 +1,624 @@
+{
+	"what": "Real devnet transactions and what each one paid THIS sale. Consumed by both the rail (packages/cryptopos-rail-solana) and the reconciler (tender-apps/apps/settled.py) so the two cannot drift apart on the one question they both answer: how much of this transaction belongs to this sale. See cryptopos DECISIONS.md D33 and D35.",
+	"captured_utc": "2026-08-25",
+	"vectors": [
+		{
+			"name": "CPS-2026-00328 \u2014 a real devnet payment, read off the chain",
+			"signature": "4s8nk6WwiUDbM2DuFsVDHBQ2pyWbwm684TvY9DAjvbiCSCE18VsRLBP2PXKitCCXtbNu1uqjjqdKew98JL4yHPkG",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "ubGNWtvZLgKk2F66PVwLVPr6WhVxNFF1XTzh3MYdrEL",
+			"expected_lamports": 102000,
+			"why": "the referenced System transfer moved exactly the invoiced amount",
+			"transaction": {
+				"blockTime": 1787668986,
+				"meta": {
+					"computeUnitsConsumed": 150,
+					"costUnits": 1481,
+					"err": null,
+					"fee": 5000,
+					"innerInstructions": [],
+					"loadedAddresses": {
+						"readonly": [],
+						"writable": []
+					},
+					"logMessages": [
+						"Program 11111111111111111111111111111111 invoke [1]",
+						"Program 11111111111111111111111111111111 success"
+					],
+					"postBalances": [
+						2453165000,
+						46815000,
+						0,
+						1
+					],
+					"postTokenBalances": [],
+					"preBalances": [
+						2453272000,
+						46713000,
+						0,
+						1
+					],
+					"preTokenBalances": [],
+					"rewards": [],
+					"status": {
+						"Ok": null
+					}
+				},
+				"slot": 487857003,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"VanmkJ16QwZRRY8Bj3Br8wZEJoM5eX9UNn7DdeX822m",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"ubGNWtvZLgKk2F66PVwLVPr6WhVxNFF1XTzh3MYdrEL",
+							"11111111111111111111111111111111"
+						],
+						"header": {
+							"numReadonlySignedAccounts": 0,
+							"numReadonlyUnsignedAccounts": 2,
+							"numRequiredSignatures": 1
+						},
+						"instructions": [
+							{
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs4KgahmSbs87R",
+								"programIdIndex": 3,
+								"stackHeight": 1
+							}
+						],
+						"recentBlockhash": "5uLBxAmzU71FhYPdo49uYVV3MnPEecE6f77Pc94cvjPo"
+					},
+					"signatures": [
+						"4s8nk6WwiUDbM2DuFsVDHBQ2pyWbwm684TvY9DAjvbiCSCE18VsRLBP2PXKitCCXtbNu1uqjjqdKew98JL4yHPkG"
+					]
+				},
+				"transactionIndex": 17,
+				"version": "legacy"
+			}
+		},
+		{
+			"name": "CPS-2026-00350 \u2014 a real devnet payment, read off the chain",
+			"signature": "2BQ7PdE2DFoJ2izdWXBXSyH3qXZvPdfDaNvFtu4aPEAzWSTyffiW7pRMfV8uAKzkPNAYAupiNLDWdR5qdLT84cYh",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "CZgmf58vGSg11TkAZTFMk55qFbW253z2ckhiWkyRBbvh",
+			"expected_lamports": 101000,
+			"why": "the referenced System transfer moved exactly the invoiced amount",
+			"transaction": {
+				"blockTime": 1787670682,
+				"meta": {
+					"computeUnitsConsumed": 150,
+					"costUnits": 1481,
+					"err": null,
+					"fee": 5000,
+					"innerInstructions": [],
+					"loadedAddresses": {
+						"readonly": [],
+						"writable": []
+					},
+					"logMessages": [
+						"Program 11111111111111111111111111111111 invoke [1]",
+						"Program 11111111111111111111111111111111 success"
+					],
+					"postBalances": [
+						2453059000,
+						46916000,
+						0,
+						1
+					],
+					"postTokenBalances": [],
+					"preBalances": [
+						2453165000,
+						46815000,
+						0,
+						1
+					],
+					"preTokenBalances": [],
+					"rewards": [],
+					"status": {
+						"Ok": null
+					}
+				},
+				"slot": 487867271,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"VanmkJ16QwZRRY8Bj3Br8wZEJoM5eX9UNn7DdeX822m",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"CZgmf58vGSg11TkAZTFMk55qFbW253z2ckhiWkyRBbvh",
+							"11111111111111111111111111111111"
+						],
+						"header": {
+							"numReadonlySignedAccounts": 0,
+							"numReadonlyUnsignedAccounts": 2,
+							"numRequiredSignatures": 1
+						},
+						"instructions": [
+							{
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs4PhG4BLLQ3vF",
+								"programIdIndex": 3,
+								"stackHeight": 1
+							}
+						],
+						"recentBlockhash": "5LaJwmkujEsWWombX9nAd6NMSZ9gGzhrkiJkpG9bp2Pb"
+					},
+					"signatures": [
+						"2BQ7PdE2DFoJ2izdWXBXSyH3qXZvPdfDaNvFtu4aPEAzWSTyffiW7pRMfV8uAKzkPNAYAupiNLDWdR5qdLT84cYh"
+					]
+				},
+				"transactionIndex": 5,
+				"version": "legacy"
+			}
+		},
+		{
+			"name": "CPS-2026-00351 \u2014 a real devnet payment, read off the chain",
+			"signature": "57n3jskbkypYa9ns4dQvE4ooRqj8iyAW77xh7qAW3tm2oJev5VVym2BPpeANV5f2Hk4GJasAiRJBY9xR3HtHgkgs",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "HoEgFS8RnaN2Hce234Y7aNRQiwHZ184T1DqMjxBkMvsp",
+			"expected_lamports": 102000,
+			"why": "the referenced System transfer moved exactly the invoiced amount",
+			"transaction": {
+				"blockTime": 1787670971,
+				"meta": {
+					"computeUnitsConsumed": 150,
+					"costUnits": 1481,
+					"err": null,
+					"fee": 5000,
+					"innerInstructions": [],
+					"loadedAddresses": {
+						"readonly": [],
+						"writable": []
+					},
+					"logMessages": [
+						"Program 11111111111111111111111111111111 invoke [1]",
+						"Program 11111111111111111111111111111111 success"
+					],
+					"postBalances": [
+						2452952000,
+						47018000,
+						0,
+						1
+					],
+					"postTokenBalances": [],
+					"preBalances": [
+						2453059000,
+						46916000,
+						0,
+						1
+					],
+					"preTokenBalances": [],
+					"rewards": [],
+					"status": {
+						"Ok": null
+					}
+				},
+				"slot": 487869005,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"VanmkJ16QwZRRY8Bj3Br8wZEJoM5eX9UNn7DdeX822m",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"HoEgFS8RnaN2Hce234Y7aNRQiwHZ184T1DqMjxBkMvsp",
+							"11111111111111111111111111111111"
+						],
+						"header": {
+							"numReadonlySignedAccounts": 0,
+							"numReadonlyUnsignedAccounts": 2,
+							"numRequiredSignatures": 1
+						},
+						"instructions": [
+							{
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs4KgahmSbs87R",
+								"programIdIndex": 3,
+								"stackHeight": 1
+							}
+						],
+						"recentBlockhash": "tEP8FmC64J2FkjuSFwZM3esABzmvH9gSEkDS9NiN2Ma"
+					},
+					"signatures": [
+						"57n3jskbkypYa9ns4dQvE4ooRqj8iyAW77xh7qAW3tm2oJev5VVym2BPpeANV5f2Hk4GJasAiRJBY9xR3HtHgkgs"
+					]
+				},
+				"transactionIndex": 4,
+				"version": "legacy"
+			}
+		},
+		{
+			"name": "CPS-2026-00352 \u2014 a real devnet payment, read off the chain",
+			"signature": "6TPZ9on6XZYwEBtsTMG1KUY4FELzMjh1vmnmYXLk6R47cD4seg3jdMjmgFGiSqBph6a4iBE29mrwf6rn6kxHKqC",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "6gWLvw4YKVzRo6i4kSADQyHvfoKHbtxfzYDESSfru4Mo",
+			"expected_lamports": 101000,
+			"why": "the referenced System transfer moved exactly the invoiced amount",
+			"transaction": {
+				"blockTime": 1787671388,
+				"meta": {
+					"computeUnitsConsumed": 150,
+					"costUnits": 1481,
+					"err": null,
+					"fee": 5000,
+					"innerInstructions": [],
+					"loadedAddresses": {
+						"readonly": [],
+						"writable": []
+					},
+					"logMessages": [
+						"Program 11111111111111111111111111111111 invoke [1]",
+						"Program 11111111111111111111111111111111 success"
+					],
+					"postBalances": [
+						2452846000,
+						47119000,
+						0,
+						1
+					],
+					"postTokenBalances": [],
+					"preBalances": [
+						2452952000,
+						47018000,
+						0,
+						1
+					],
+					"preTokenBalances": [],
+					"rewards": [],
+					"status": {
+						"Ok": null
+					}
+				},
+				"slot": 487871523,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"VanmkJ16QwZRRY8Bj3Br8wZEJoM5eX9UNn7DdeX822m",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"6gWLvw4YKVzRo6i4kSADQyHvfoKHbtxfzYDESSfru4Mo",
+							"11111111111111111111111111111111"
+						],
+						"header": {
+							"numReadonlySignedAccounts": 0,
+							"numReadonlyUnsignedAccounts": 2,
+							"numRequiredSignatures": 1
+						},
+						"instructions": [
+							{
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs4PhG4BLLQ3vF",
+								"programIdIndex": 3,
+								"stackHeight": 1
+							}
+						],
+						"recentBlockhash": "9unsprkAaRjjd7z2CZGFT23MoSkSCWiEc6hHpMMVyxgt"
+					},
+					"signatures": [
+						"6TPZ9on6XZYwEBtsTMG1KUY4FELzMjh1vmnmYXLk6R47cD4seg3jdMjmgFGiSqBph6a4iBE29mrwf6rn6kxHKqC"
+					]
+				},
+				"transactionIndex": 16,
+				"version": "legacy"
+			}
+		},
+		{
+			"name": "one transfer naming two sales' references",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			"expected_lamports": null,
+			"why": "Solana Pay permits several references per transfer, so this payment belongs to neither sale. Both implementations must refuse it rather than credit 100 twice.",
+			"transaction": {
+				"slot": 20,
+				"blockTime": 1500,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"payer",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+							"refBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+							"11111111111111111111111111111111"
+						],
+						"instructions": [
+							{
+								"programIdIndex": 4,
+								"accounts": [
+									0,
+									1,
+									2,
+									3
+								],
+								"data": "3Bxs4HanWsHUZCbH"
+							}
+						]
+					}
+				},
+				"meta": {
+					"err": null,
+					"preBalances": [
+						1000,
+						0,
+						0,
+						0,
+						1
+					],
+					"postBalances": [
+						900,
+						100,
+						0,
+						0,
+						1
+					]
+				}
+			}
+		},
+		{
+			"name": "the same transfer, asked about the OTHER sale",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "refBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+			"expected_lamports": null,
+			"why": "symmetry: neither sale may claim it",
+			"transaction": {
+				"slot": 20,
+				"blockTime": 1500,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"payer",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+							"refBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+							"11111111111111111111111111111111"
+						],
+						"instructions": [
+							{
+								"programIdIndex": 4,
+								"accounts": [
+									0,
+									1,
+									2,
+									3
+								],
+								"data": "3Bxs4HanWsHUZCbH"
+							}
+						]
+					}
+				},
+				"meta": {
+					"err": null,
+					"preBalances": [
+						1000,
+						0,
+						0,
+						0,
+						1
+					],
+					"postBalances": [
+						900,
+						100,
+						0,
+						0,
+						1
+					]
+				}
+			}
+		},
+		{
+			"name": "a second instruction pays the merchant without our reference",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			"expected_lamports": 60,
+			"why": "the balance delta is 102; only the referenced 60 is this sale's money",
+			"transaction": {
+				"slot": 20,
+				"blockTime": 1500,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"payer",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+							"11111111111111111111111111111111"
+						],
+						"instructions": [
+							{
+								"programIdIndex": 3,
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs4AtjcJzipstb"
+							},
+							{
+								"programIdIndex": 3,
+								"accounts": [
+									0,
+									1
+								],
+								"data": "3Bxs47t7W4Tyww5H"
+							}
+						]
+					}
+				},
+				"meta": {
+					"err": null,
+					"preBalances": [
+						1000,
+						0,
+						0,
+						1
+					],
+					"postBalances": [
+						898,
+						102,
+						0,
+						1
+					]
+				}
+			}
+		},
+		{
+			"name": "split payment across two referenced transfers",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			"expected_lamports": 60,
+			"why": "both carry the reference, so both are ours and they sum",
+			"transaction": {
+				"slot": 20,
+				"blockTime": 1500,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"payer",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+							"11111111111111111111111111111111"
+						],
+						"instructions": [
+							{
+								"programIdIndex": 3,
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs453C4pk4ZbXV"
+							},
+							{
+								"programIdIndex": 3,
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs46iCnxpFVgCf"
+							}
+						]
+					}
+				},
+				"meta": {
+					"err": null,
+					"preBalances": [
+						1000,
+						0,
+						0,
+						1
+					],
+					"postBalances": [
+						940,
+						60,
+						0,
+						1
+					]
+				}
+			}
+		},
+		{
+			"name": "instructions claim more than the balance moved",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			"expected_lamports": null,
+			"why": "the recipient also spent, paid the fee, or the node is inconsistent. Refusing beats picking the larger number.",
+			"transaction": {
+				"slot": 20,
+				"blockTime": 1500,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"payer",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+							"11111111111111111111111111111111"
+						],
+						"instructions": [
+							{
+								"programIdIndex": 3,
+								"accounts": [
+									0,
+									1,
+									2
+								],
+								"data": "3Bxs4AtjcJzipstb"
+							}
+						]
+					}
+				},
+				"meta": {
+					"err": null,
+					"preBalances": [
+						1000,
+						0,
+						0,
+						1
+					],
+					"postBalances": [
+						960,
+						40,
+						0,
+						1
+					]
+				}
+			}
+		},
+		{
+			"name": "the reference is mentioned but paid nothing",
+			"recipient": "GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+			"reference": "refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			"expected_lamports": null,
+			"why": "a transaction can touch the key without paying us; getSignaturesForAddress returns it anyway",
+			"transaction": {
+				"slot": 20,
+				"blockTime": 1500,
+				"transaction": {
+					"message": {
+						"accountKeys": [
+							"payer",
+							"GyKqcxqdA7PbgbFXMW55G8rht5FhWPvgj9T96psdtZKc",
+							"refAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+							"11111111111111111111111111111111"
+						],
+						"instructions": [
+							{
+								"programIdIndex": 3,
+								"accounts": [
+									0,
+									1
+								],
+								"data": "3Bxs4HanWsHUZCbH"
+							}
+						]
+					}
+				},
+				"meta": {
+					"err": null,
+					"preBalances": [
+						1000,
+						0,
+						0,
+						1
+					],
+					"postBalances": [
+						900,
+						100,
+						0,
+						1
+					]
+				}
+			}
+		}
+	]
+}

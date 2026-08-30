@@ -4,7 +4,7 @@ import importlib.metadata
 import inspect
 
 from .errors import DuplicateRail, InvalidRailPlugin, RailNotInstalled
-from .plugin import KNOWN_CAPABILITIES, Asset, Network, PaymentRail
+from .plugin import KNOWN_CAPABILITIES, Asset, Network, PaymentRail, binding_category_for
 
 ENTRY_POINT_GROUP = "cryptopos.rails"
 
@@ -19,6 +19,7 @@ def validate_plugin(plugin):
 		raise InvalidRailPlugin("plugin key must be '<network key>/<asset key>'")
 	if not isinstance(plugin.capabilities, frozenset):
 		raise InvalidRailPlugin("capabilities must be a frozenset")
+	binding_category_for(plugin)
 	call_shapes = {
 		"readiness": (1,),
 		"capture_baseline": (2,),

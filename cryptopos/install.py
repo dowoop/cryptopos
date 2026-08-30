@@ -65,6 +65,17 @@ ADAPTERS = {
 		"amoy",
 		1,
 	),
+	# Native POL, seedable since the observer was composed on 2026-08-24. Same
+	# endpoint and transport as the USDC rail above because it is the same
+	# chain -- the two differ only in what they watch for at the address, and
+	# `rails_probe` reproduces that they cannot take each other's payments.
+	"pol": (
+		"polygon:amoy/native:pol",
+		"https://polygon-amoy-bor-rpc.publicnode.com",
+		"json-rpc",
+		"amoy",
+		1,
+	),
 }
 
 

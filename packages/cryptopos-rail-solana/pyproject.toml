@@ -1,0 +1,34 @@
+[project]
+name = "cryptopos-rail-solana"
+version = "0.1.0"
+description = "A dependency-free Solana devnet SOL payment rail for CryptoPoS."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.entry-points."cryptopos.rails"]
+solana-devnet-sol = "cryptopos_rail_solana:solana_devnet_sol"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cryptopos_rail_solana"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "pyproject.toml"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = ["E501", "W191"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402"]

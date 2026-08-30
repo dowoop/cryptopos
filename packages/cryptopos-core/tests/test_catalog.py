@@ -2,6 +2,7 @@
 
 import unittest
 
+from cryptopos_core import rails
 from cryptopos_core.catalog import (
 	BUILTIN_RAILS,
 	dash_testnet,
@@ -22,6 +23,7 @@ from cryptopos_core.plugin import (
 	CHARGE_CAPABILITIES,
 	OBSERVATION,
 	PAYMENT_REQUEST,
+	SETTLEMENT,
 	PaymentIntent,
 	RecipientBaseline,
 )
@@ -51,6 +53,26 @@ class CatalogIdentity(unittest.TestCase):
 		self.assertEqual(len(loaded), 12)
 		self.assertEqual(set(registry.keys()), {rail.key for rail in BUILTIN_RAILS})
 
+	def test_every_builtin_declares_the_legacy_rail_binding_category(self):
+		legacy = (
+			"btc",
+			"eth",
+			"usdc-eth",
+			"pol",
+			"usdc-pol",
+			"sol",
+			"usdc-sol",
+			"xmr",
+			"xtm",
+			"xtr",
+			"dash",
+			"zec",
+		)
+		self.assertEqual(
+			[rail.binding_category for rail in BUILTIN_RAILS],
+			[rails.RAILS[key]["binding_category"] for key in legacy],
+		)
+
 	def test_only_the_extracted_observers_declare_the_complete_charge_path(self):
 		complete = [rail.key for rail in BUILTIN_RAILS if CHARGE_CAPABILITIES <= rail.capabilities]
 		self.assertEqual(
@@ -59,6 +81,11 @@ class CatalogIdentity(unittest.TestCase):
 				"bitcoin:testnet4/native:btc",
 				"ethereum:sepolia/native:eth",
 				"ethereum:sepolia/erc20:0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+				# Native POL joined this list on 2026-08-24. It had been a
+				# `RequestRail` blocked on "the observer has not been extracted",
+				# and the extraction turned out to be composition: Sepolia's
+				# native path plus Amoy's finalized-block gate, both already here.
+				"polygon:amoy/native:pol",
 				"polygon:amoy/erc20:0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582",
 			],
 		)
@@ -67,12 +94,38 @@ class CatalogIdentity(unittest.TestCase):
 		self.assertIn("4zMMC9", usdc_solana_devnet.asset.reference)
 		self.assertIn(usdc_solana_devnet.asset.reference, usdc_solana_devnet.key)
 
+	def test_chargeable_asset_atomic_scales_are_pinned(self):
+		"""The scale of a rail that can actually take money.
+
+		Native POL was pinned only in the request-only test above until
+		2026-08-24. When it became chargeable it left that list, and its scale
+		stopped being asserted anywhere -- a mutation of `18` to `19` survived
+		the whole suite. A wrong exponent here misprices every sale on the rail
+		by a factor of ten, so it is pinned where the rail now lives.
+		"""
+		self.assertEqual(
+			{
+				rail.key: (rail.asset.decimals, rail.asset.symbol)
+				for rail in (
+					ethereum_sepolia,
+					usdc_ethereum_sepolia,
+					polygon_amoy,
+					usdc_polygon_amoy,
+				)
+			},
+			{
+				"ethereum:sepolia/native:eth": (18, "SepoliaETH"),
+				"ethereum:sepolia/erc20:0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": (6, "USDC"),
+				"polygon:amoy/native:pol": (18, "AmoyPOL"),
+				"polygon:amoy/erc20:0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582": (6, "USDC"),
+			},
+		)
+
 	def test_request_only_asset_atomic_scales_are_pinned(self):
 		self.assertEqual(
 			{
 				rail.key: rail.asset.decimals
 				for rail in (
-					polygon_amoy,
 					solana_devnet,
 					usdc_solana_devnet,
 					monero_stagenet,
@@ -82,7 +135,6 @@ class CatalogIdentity(unittest.TestCase):
 				)
 			},
 			{
-				"polygon:amoy/native:pol": 18,
 				"solana:devnet/native:sol": 9,
 				"solana:devnet/spl:4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU": 6,
 				"monero:stagenet/native:xmr": 12,
@@ -146,6 +198,24 @@ class RequestAdapters(unittest.TestCase):
 				readiness = rail.readiness({})
 				self.assertFalse(readiness.chargeable)
 				self.assertTrue(readiness.reason_for(OBSERVATION))
+
+	def test_the_earliest_blocked_step_is_reported_first(self):
+		"""`unavailable` is ordered, and the order is the order a sale would hit.
+
+		`RequestRail.readiness` inserts at position 0 twice, so a rail that can
+		do nothing reports payment-request before address-validation before
+		observation before settlement -- the sequence a cashier would meet them
+		in. Nothing asserted that until 2026-08-24, when both inserts survived
+		mutation to position 1: the list still held the same four reasons, in an
+		order that no longer told the operator which wall they hit first.
+
+		Monero is the only built-in missing both, so it is the only rail that
+		exercises both inserts.
+		"""
+		self.assertEqual(
+			[capability for capability, _ in monero_stagenet.readiness({}).unavailable],
+			[PAYMENT_REQUEST, ADDRESS_VALIDATION, OBSERVATION, SETTLEMENT],
+		)
 
 
 if __name__ == "__main__":

@@ -53,6 +53,7 @@ class Conformance(unittest.TestCase):
 			"broken",
 			BUILTIN_RAILS[-1].network,
 			BUILTIN_RAILS[-1].asset,
+			binding_category="not-unconditional",
 			blocker="fixture",
 		)
 		with self.assertRaises(InvalidRailPlugin) as caught:

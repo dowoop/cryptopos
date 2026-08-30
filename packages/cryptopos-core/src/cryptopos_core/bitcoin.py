@@ -37,6 +37,7 @@ from .plugin import (
 	SettlementDecision,
 	TransferObservation,
 )
+from .rails import RAILS
 from .uri import build_uri
 
 TESTNET4_GENESIS_HASH = "00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043"
@@ -183,6 +184,7 @@ class BitcoinTestnet4:
 	network = Network("bitcoin", "testnet4", True)
 	asset = Asset("native", "btc", "TBTC", 8)
 	key = f"{network.key}/{asset.key}"
+	binding_category = RAILS["btc"]["binding_category"]
 	capabilities = frozenset({ADDRESS_VALIDATION, PAYMENT_REQUEST, OBSERVATION, SETTLEMENT})
 
 	def validate_recipient(self, recipient):

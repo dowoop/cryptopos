@@ -17,6 +17,7 @@ from cryptopos_core.hd import (
 	InvalidExtendedKey,
 	derive_child,
 	derive_path,
+	evm_address,
 	p2wpkh_address,
 	parse_extended_key,
 )
@@ -140,6 +141,47 @@ class PublishedBip84Vectors(unittest.TestCase):
 		for index in range(3):
 			address = p2wpkh_address(derive_path(account, f"0/{index}"), "tb")
 			self.assertEqual(addresses.validate("btc", address, "testnet")[0], OK)
+
+
+class EvmAddresses(unittest.TestCase):
+	def setUp(self):
+		self.account = parse_extended_key(BIP32_VECTOR_1["m/0H/1/2H"])
+
+	def test_every_derived_address_verifies_through_the_library_validator(self):
+		for index in range(3):
+			address = evm_address(derive_path(self.account, f"0/{index}"))
+			with self.subTest(index=index, address=address):
+				self.assertEqual(addresses.validate("eth", address, "testnet"), (OK, ""))
+
+	def test_same_key_and_index_are_deterministic_and_another_index_is_distinct(self):
+		first = evm_address(derive_path(self.account, "0/0"))
+		self.assertEqual(first, evm_address(derive_path(self.account, "0/0")))
+		self.assertNotEqual(first, evm_address(derive_path(self.account, "0/1")))
+
+	def test_address_is_the_last_twenty_keccak_bytes_of_the_uncompressed_point(self):
+		child = derive_path(self.account, "0/0")
+		x, y = hd._point_from_public_key(child.public_key)
+		uncompressed_point = x.to_bytes(32, "big") + y.to_bytes(32, "big")
+		self.assertEqual(
+			bytes.fromhex(evm_address(child)[2:]),
+			hd.keccak256(uncompressed_point)[-20:],
+		)
+
+	def test_only_xpub_version_bytes_are_evm_receiving_material(self):
+		payload = payload_of(BIP32_VECTOR_1["m/0H/1/2H"])
+		for version in (0x043587CF, 0x04B24746, 0x045F1CF6):
+			wrong_family = parse_extended_key(b58check(version.to_bytes(4, "big") + payload[4:]))
+			with self.subTest(version=hex(version)), self.assertRaisesRegex(
+				InvalidExtendedKey, "requires xpub.*tpub, zpub, and vpub.*refused"
+			):
+				evm_address(wrong_family)
+
+	def test_evm_address_requires_an_extended_key_and_valid_public_point(self):
+		with self.assertRaisesRegex(InvalidExtendedKey, "ExtendedKey"):
+			evm_address(object())
+		bad = ExtendedKey(0x0488B21E, 0, b"\0" * 4, 0, b"\0" * 32, b"bad")
+		with self.assertRaisesRegex(InvalidExtendedKey, "compressed public key"):
+			evm_address(bad)
 
 
 # BIP-173 Appendix "Test vectors" and BIP-350 "Test vectors for Bech32m":

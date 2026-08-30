@@ -33,7 +33,7 @@ from .plugin import (
 	SettlementDecision,
 	TransferObservation,
 )
-from .rails import USDC_ON_AMOY, USDC_ON_SEPOLIA
+from .rails import RAILS, USDC_ON_AMOY, USDC_ON_SEPOLIA
 from .uri import build_uri
 
 SEPOLIA_CHAIN_ID = 11_155_111
@@ -152,6 +152,7 @@ class EthereumSepoliaRail:
 		self.asset = asset
 		self.token_contract = token_contract
 		self.key = f"{self.network.key}/{asset.key}"
+		self.binding_category = RAILS[legacy_key]["binding_category"]
 		self.capabilities = frozenset({ADDRESS_VALIDATION, PAYMENT_REQUEST, OBSERVATION, SETTLEMENT})
 
 	def validate_recipient(self, recipient):
@@ -215,13 +216,27 @@ class EthereumSepoliaRail:
 		if tip < cursor:
 			raise RailProviderError(self.key, "provider tip is behind the observation cursor")
 		through = min(tip, cursor + self.max_blocks_per_observation)
+		# Read the finalized tip HERE, beside the tip it is checked against, and
+		# not after the scan below.
+		#
+		# `_native_transfers` costs one `eth_getBlockByNumber` per block. On a
+		# two-second chain a few hundred blocks of catch-up is minutes of
+		# sequential calls, during which the chain keeps finalizing -- so a
+		# finalized tip read afterwards is compared against a `tip` from minutes
+		# ago and is legitimately above it. That raised "finalized block is above
+		# the latest block" on every native Amoy observation, while the token
+		# rail on the same chain survived only because `eth_getLogs` is one call
+		# and leaves almost no window. Both numbers now describe one instant.
+		#
+		# Reading it earlier can only make the gate more conservative: an older
+		# finalized height matures fewer transfers, never more.
+		finalized_tip = self._finalized_tip(provider, tip)
 		if through == cursor:
 			transfers = []
 		elif self.token_contract is None:
 			transfers = self._native_transfers(provider, intent.recipient, cursor + 1, through, tip)
 		else:
 			transfers = self._token_transfers(provider, intent.recipient, cursor + 1, through, tip)
-		finalized_tip = self._finalized_tip(provider, tip)
 		page = ObservationBatch(
 			self.key,
 			intent.intent_id,
@@ -485,8 +500,14 @@ usdc_ethereum_sepolia = EthereumSepoliaRail(
 )
 
 
-class PolygonAmoyUsdcRail(EthereumSepoliaRail):
-	"""USDC on Amoy, settled only once Heimdall reports the block finalized."""
+class PolygonAmoyRail(EthereumSepoliaRail):
+	"""One Amoy asset, settled only once the chain reports the block finalized.
+
+	The gate is a property of the *chain*, not of the asset: `eth_getBlockByNumber
+	("finalized")` knows nothing about which token moved. So this class serves
+	native POL and any Amoy ERC-20 alike, exactly as its Sepolia base class does
+	for confirmation counting -- `token_contract=None` selects native.
+	"""
 
 	network = Network("polygon", "amoy", True)
 	chain_id = 80_002
@@ -515,8 +536,18 @@ class PolygonAmoyUsdcRail(EthereumSepoliaRail):
 		return "payment is awaiting Polygon finalized-block inclusion"
 
 
-usdc_polygon_amoy = PolygonAmoyUsdcRail(
+usdc_polygon_amoy = PolygonAmoyRail(
 	"usdc-pol",
 	Asset("erc20", USDC_ON_AMOY.lower(), "USDC", 6),
 	token_contract=USDC_ON_AMOY,
 )
+
+# Native POL on Amoy. This was a `RequestRail` in `catalog.py` until 2026-08-24,
+# carrying the blocker "the provider-specific observer has not been extracted
+# into this package" -- so the terminal could build a payment request for POL and
+# could never see one arrive. Nothing needed extracting in the end: native
+# observation is the `token_contract=None` path this class already inherits from
+# Sepolia, and the maturity gate is the Amoy one directly above. The rail was
+# request-only because nobody had composed the two halves, not because either
+# half was missing.
+polygon_amoy = PolygonAmoyRail("pol", Asset("native", "pol", "AmoyPOL", 18))

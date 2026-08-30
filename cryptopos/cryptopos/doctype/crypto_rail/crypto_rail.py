@@ -6,7 +6,8 @@ from frappe.model.document import Document
 
 from cryptopos_core import hd
 
-_MAINNET_PUBLIC_VERSIONS = frozenset((0x0488B21E, 0x04B24746))
+_BITCOIN_TESTNET_PUBLIC_VERSIONS = frozenset((0x043587CF, 0x045F1CF6))
+_EVM_PUBLIC_VERSIONS = frozenset((0x0488B21E,))
 
 
 # See `catalog.FRESH_RECIPIENT_FAMILIES` -- kept here as a literal rather than
@@ -14,9 +15,12 @@ _MAINNET_PUBLIC_VERSIONS = frozenset((0x0488B21E, 0x04B24746))
 _FRESH_RECIPIENT_FAMILIES = frozenset({"bitcoin"})
 
 # Families for which this terminal can build an address from a derived key.
-# Only BIP-84 P2WPKH exists; EVM would need BIP-44 + keccak, which was
-# proposed and rejected -- see DECISIONS.md D9.
-_DERIVING_FAMILIES = frozenset({"bitcoin"})
+_PUBLIC_VERSIONS_BY_FAMILY = {
+	"bitcoin": _BITCOIN_TESTNET_PUBLIC_VERSIONS,
+	"evm-native": _EVM_PUBLIC_VERSIONS,
+	"evm-erc20": _EVM_PUBLIC_VERSIONS,
+}
+_DERIVING_FAMILIES = frozenset(_PUBLIC_VERSIONS_BY_FAMILY)
 
 
 class CryptoRail(Document):
@@ -46,11 +50,9 @@ class CryptoRail(Document):
 			)
 
 		if xpub and (self.family or "") not in _DERIVING_FAMILIES:
-			# Derivation is address-format specific and only P2WPKH exists
-			# here. Without this, an EVM rail given a key derived a bech32
-			# Bitcoin address and offered it as an Ethereum recipient; the
-			# adapter refused it at charge time, so it failed safe -- but it
-			# failed at the counter rather than at the form.
+			# Derivation is address-format specific. Without this guard, a new
+			# family could inherit whichever builder happened to be written for
+			# an existing one and offer a valid address for the wrong chain.
 			frappe.throw(
 				_(
 					"{0} cannot derive its own addresses: this terminal only knows "
@@ -83,13 +85,21 @@ class CryptoRail(Document):
 				# Preserve the core's precise refusal: checksum, length, private
 				# material, and invalid points each need a different remedy.
 				frappe.throw(str(exception), title=_("Testnet extended key refused"))
-			if key.version in _MAINNET_PUBLIC_VERSIONS:
+			allowed_versions = _PUBLIC_VERSIONS_BY_FAMILY[self.family or ""]
+			if key.version not in allowed_versions:
+				if (self.family or "") == "bitcoin":
+					reason = (
+						"Bitcoin Testnet Xpub requires tpub/vpub version bytes. "
+						"Mainnet xpub/zpub version bytes are refused."
+					)
+				else:
+					reason = (
+						"EVM Testnet Xpub requires conventional xpub version bytes. "
+						"Bitcoin tpub, zpub, and vpub version bytes are refused."
+					)
 				frappe.throw(
-					_(
-						"Testnet Xpub refuses mainnet xpub/zpub version bytes. "
-						"Configure the account key with testnet tpub/vpub version bytes."
-					),
-					title=_("Mainnet key refused"),
+					_(reason),
+					title=_("Wrong-family key refused"),
 				)
 			if key.depth != 3:
 				frappe.throw(

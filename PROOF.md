@@ -83,6 +83,7 @@ strings, and the short-checksum case solved algebraically rather than searched.
 | symbol | what it is for | proved by |
 |---|---|---|
 | `_identifier`, `_reference` | bounded ASCII identity grammars; URI punctuation cannot become part of a rail identity | `test_plugin.Identity`, `test_plugin_boundaries.IdentityBoundaries` |
+| `binding_category_for` | validate an explicit binding declaration while defaulting pre-category published plugins pessimistically without removing them from discovery | `test_plugin.Registry.test_a_published_plugin_without_the_new_field_stays_driveable_and_defaults_safely`, `test_unknown_binding_category_is_refused` |
 | `Network`, `Network.__post_init__`, `Network.key` | a concrete, explicitly test/main network rather than an ambiguous mode | `test_plugin.Identity`, `IdentityBoundaries` |
 | `Asset`, `Asset.__post_init__`, `Asset.key` | the on-network asset identity and exact atomic scale | `test_plugin.Identity`, `IdentityBoundaries` |
 | `RecipientBaseline`, `RecipientBaseline.__post_init__` | provider, recipient, position and pre-payment facts captured before showing a request | `BaselineAndIntentBoundaries`, rail baseline tests |
@@ -116,7 +117,7 @@ strings, and the short-checksum case solved algebraically rather than searched.
 | `EthereumSepoliaRail._finalized_tip`, `EthereumSepoliaRail._is_mature`, `EthereumSepoliaRail._settled_reason`, `EthereumSepoliaRail._pending_reason` | Sepolia's three-confirmation policy hooks, overridden where Amoy needs finalized inclusion | settlement-policy tests |
 | `EthereumSepoliaRail._receipt_success`, `EthereumSepoliaRail._native_transfers`, `EthereumSepoliaRail._token_transfers`, `EthereumSepoliaRail._block_timestamp` | receipt-, block-hash-, contract-, topic-, and timestamp-bound attribution from hostile provider data | `EvmProviderDataFailures`, native/token settlement tests |
 | `EthereumSepoliaRail._verified_recipient`, `EthereumSepoliaRail._intent` | checksum and sale/rail binding before a request or observation | address and cross-intent tests |
-| `PolygonAmoyUsdcRail`, `PolygonAmoyUsdcRail._finalized_tip`, `PolygonAmoyUsdcRail._is_mature`, `PolygonAmoyUsdcRail._settled_reason`, `PolygonAmoyUsdcRail._pending_reason` | replace confirmation counting with Polygon finalized-block inclusion | Amoy finality tests |
+| `PolygonAmoyRail`, `PolygonAmoyRail._finalized_tip`, `PolygonAmoyRail._is_mature`, `PolygonAmoyRail._settled_reason`, `PolygonAmoyRail._pending_reason` | replace confirmation counting with Polygon finalized-block inclusion; asset-agnostic, so it carries both native POL and Amoy USDC | Amoy finality tests |
 
 ## `catalog.py`, `ootle.py`, `registry.py`, and `conformance.py`
 
@@ -203,6 +204,7 @@ does not manufacture the values used to judge the production implementation.
 | `derive_path` | compose CKDpub over a relative decimal path and refuse master or hardened notation | BIP-32/BIP-84 vectors and `DerivationRefusals` |
 | `_bech32_polymod`, `_bech32_hrp_expand`, `_convert_bits`, `_bech32_encode` | encode a bounded lowercase Bech32/Bech32m string and refuse invalid HRP/data shapes | published BIP-173/BIP-350 valid and invalid vectors, `InternalBoundaries` |
 | `p2wpkh_address` | turn HASH160(compressed public key) into a BIP-84 witness-v0 address for the requested HRP | BIP-84's first two receiving addresses and existing-decoder round trips |
+| `evm_address` | turn the uncompressed secp256k1 point into the last 20 Keccak-256 bytes and apply the shared EIP-55 formatter | deterministic derived children, raw digest property, and the existing EVM validator |
 
 ## `chain.py` — the policy tier, read without an account and without a fee
 

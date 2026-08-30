@@ -6,6 +6,10 @@ on:
       - "packages/cryptopos-core/**"
       - "tools/prove.py"
       - "tools/worth.py"
+      - "tools/reorg_probe.py"
+      - "tools/reorg_probe_core.py"
+      - "tools/h_reorg_probe.py"
+      - "Makefile"
       - "PROOF.md"
       - ".github/workflows/core.yml"
   pull_request:
@@ -13,6 +17,10 @@ on:
       - "packages/cryptopos-core/**"
       - "tools/prove.py"
       - "tools/worth.py"
+      - "tools/reorg_probe.py"
+      - "tools/reorg_probe_core.py"
+      - "tools/h_reorg_probe.py"
+      - "Makefile"
       - "PROOF.md"
       - ".github/workflows/core.yml"
   workflow_dispatch:
@@ -46,7 +54,9 @@ jobs:
         with:
           python-version: "3.14"
       - run: python -m pip install ruff==0.16.3
-      - run: ruff check packages/cryptopos-core tools/prove.py tools/worth.py
+      - run: ruff check packages/cryptopos-core tools/prove.py tools/worth.py tools/reorg_probe.py tools/reorg_probe_core.py tools/h_reorg_probe.py
+      - name: Reorg probe offline gate
+        run: python tools/h_reorg_probe.py
       - name: Prove every line and symbol
         run: PYTHONPATH="$GITHUB_WORKSPACE/packages/cryptopos-core/src" python tools/prove.py
       - name: Mutation test the core

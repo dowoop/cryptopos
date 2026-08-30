@@ -691,6 +691,37 @@ class EvmProviderDataFailures(unittest.TestCase):
 
 		rail._probe_observation(self.provider(max_logs), 6)
 
+	def test_observation_log_ceiling_is_a_boundary_not_a_bound(self):
+		"""Exactly `MAX_LOGS_PER_OBSERVATION` is allowed; one more is refused.
+
+		`_probe_observation` and `_token_transfers` carry the same guard, and
+		only the probe's copy was pinned -- so `>` mutated to `>=` in the
+		observation path and the whole suite stayed green. That mutation makes a
+		provider returning exactly the ceiling look malicious and strands a real
+		payment inside a legitimate response.
+
+		Called directly rather than through `observe`, so the assertion is about
+		this guard and cannot be moved by the order of unrelated RPC calls.
+		"""
+		rail = evm.usdc_ethereum_sepolia
+
+		def answer(count):
+			def handler(method, params):
+				if method == "eth_getLogs":
+					return [{}] * count
+				return "0x01"
+			return handler
+
+		# At the ceiling the guard must pass and hand the logs on to be parsed;
+		# `{}` is not a well-formed log, so it fails LATER and differently.
+		with self.assertRaises(RailProviderError) as at_ceiling:
+			rail._token_transfers(self.provider(answer(evm.MAX_LOGS_PER_OBSERVATION)), EVM_RECIPIENT, 1, 2, 9)
+		self.assertIn("malformed or removed", str(at_ceiling.exception))
+
+		with self.assertRaises(RailProviderError) as over_ceiling:
+			rail._token_transfers(self.provider(answer(evm.MAX_LOGS_PER_OBSERVATION + 1)), EVM_RECIPIENT, 1, 2, 9)
+		self.assertIn("malformed or excessive", str(over_ceiling.exception))
+
 	def test_receipt_is_bound_to_transaction_height_and_block_hash(self):
 		for receipt in (
 			None,
