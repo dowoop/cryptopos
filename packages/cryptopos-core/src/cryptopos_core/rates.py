@@ -60,6 +60,21 @@ MICROCENTS_PER_USD = 1_000_000
 # the sale so nobody mistakes it for a quote anybody actually made.
 DEMO_MICROCENTS = {
 	"btc": 64_000 * MICROCENTS_PER_USD,
+	# XTR, at the $0.05 `rails.py` picked. It is a NUMBER SOMEBODY CHOSE and
+	# not a price anybody quoted, which is exactly what this table is for and
+	# why it can never be reached in a real-money mode.
+	#
+	# Tari is listed on none of the feeds here -- re-measured 2026-08-28 by
+	# `live_tari_watch.py`, verdict "NOTHING CHANGED", Coinbase answering 404
+	# for XTM-USD -- so without an entry the rail raises `RateUnavailable` and
+	# cannot be charged at all, even on a testnet where nothing is at stake.
+	#
+	# It is keyed `xtr` rather than `xtm` because `charge()` asks with the
+	# Crypto Rail ROW's asset (D26: the row, never the frozen table), and the
+	# row says XTR. `rails.price_asset` exists to say XTR should be priced as
+	# XTM and no caller consults it; when a feed does list Tari, that gap is
+	# what has to close before this entry can be deleted.
+	"xtr": 5 * MICROCENTS_PER_USD // 100,
 }
 
 FEED_TIMEOUT_SECONDS = 6

@@ -9,7 +9,6 @@ from cryptopos_core.catalog import (
 	ethereum_sepolia,
 	minotari_esmeralda,
 	monero_stagenet,
-	ootle_esmeralda,
 	polygon_amoy,
 	solana_devnet,
 	usdc_ethereum_sepolia,
@@ -87,6 +86,7 @@ class CatalogIdentity(unittest.TestCase):
 				# native path plus Amoy's finalized-block gate, both already here.
 				"polygon:amoy/native:pol",
 				"polygon:amoy/erc20:0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582",
+				"ootle:esmeralda/native:xtr",
 			],
 		)
 
@@ -180,7 +180,7 @@ class RequestAdapters(unittest.TestCase):
 		self.assertTrue(request.uri.startswith("tari://esmeralda/"))
 
 	def test_unimplemented_payment_schemes_are_explicitly_unavailable(self):
-		for rail in (monero_stagenet, ootle_esmeralda):
+		for rail in (monero_stagenet,):
 			with self.subTest(rail=rail.key):
 				self.assertNotIn(PAYMENT_REQUEST, rail.capabilities)
 				self.assertTrue(rail.readiness({}).reason_for(PAYMENT_REQUEST))

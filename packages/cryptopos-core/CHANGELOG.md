@@ -24,8 +24,12 @@ of point-of-sale helpers.
   adapters say exactly which capability is unavailable rather than simulating
   a successful charge path.
 * Split Ootle payment observation from loyalty policy reads. The payment rail
-  can observe a public XTR balance increase but reports it as unattributed and
-  cannot settle it until the indexer can bind it to a transaction.
+  consumes the indexer's vault-filtered deposit SSE replay, carries its
+  monotonic event ID as an exact resumable cursor, attributes exact amounts to
+  transaction IDs, uses UTC `finalized_at` for expiry, and settles committed
+  deposits without a confirmation-depth gate. Its request remains an account
+  address with an explicit notice because no registered Ootle payment URI
+  exists.
 * Demo payment requests now use test deployments, addresses, chain IDs, and
   Esmeralda authorities. Only explicit `mainnet` selects mainnet identity.
 * Hardened oversized address input, canonical Monero prefix encoding, hostile

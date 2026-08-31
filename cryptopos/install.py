@@ -76,6 +76,24 @@ ADAPTERS = {
 		"amoy",
 		1,
 	),
+	# THE ONE RAIL WHOSE TRANSPORT IS NOT A NODE RPC. The Ootle indexer is
+	# REST plus server-sent events, and the events are the point: a deposit
+	# arrives with a transaction id and an exact amount, filtered to one vault,
+	# replayable from a cursor. Every other rail here rescans and can miss a
+	# payment between reads; this one cannot.
+	#
+	# Enabled, and honestly so: a real customer payment of 1,234,000 microTari
+	# was observed and settled through this adapter on 2026-08-31. What it
+	# cannot do is price itself -- Tari is listed on no feed this build reads,
+	# so it charges at the demo rate in `rates.DEMO_MICROCENTS`, which can
+	# never be reached in a real-money mode.
+	"xtr": (
+		"ootle:esmeralda/native:xtr",
+		"https://ootle-indexer-a.tari.com",
+		"ootle-indexer-rest",
+		"esmeralda",
+		1,
+	),
 }
 
 

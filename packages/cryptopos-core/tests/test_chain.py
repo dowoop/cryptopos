@@ -732,8 +732,34 @@ class AmountDecoding(unittest.TestCase):
 		self.assertIsNone(chain._amount(["not a number"]))
 		self.assertIsNone(chain._amount([{"nested": "thing"}]))
 
+	def test_a_bare_decimal_string(self):
+		"""The shape esmeralda's 0.39.3 indexer actually answers with.
+
+		This assertion is the reverse of what this class asserted until
+		2026-08-30, and the reversal is the finding. A bare string used to be
+		refused deliberately, on the reasoning that an unrecognised shape must
+		not be truncated into a number. Measured against the live network, a
+		funded account's vault returns
+
+			{"Stealth": {"revealed_amount": "999997692", "locked_amount": "0"}}
+
+		so refusing it made the library reject its own live answer as "a shape
+		this build does not recognise", and the Ootle rail could not read a
+		balance at all. `_exact_integer` parses a decimal string exactly and
+		refuses anything else, so nothing is truncated by accepting this --
+		the float, dict, bool and None cases below still refuse.
+		"""
+		self.assertEqual(chain._amount("999997692"), 999997692)
+		self.assertEqual(chain._amount("100"), 100)
+		self.assertEqual(chain._amount(" 42 "), 42)
+
+	def test_a_string_that_is_not_an_exact_integer_is_still_refused(self):
+		for entry in ("1.5", "0x10", "", "12abc", "1e6"):
+			with self.subTest(entry=entry):
+				self.assertIsNone(chain._amount(entry))
+
 	def test_shapes_it_does_not_recognise_are_none(self):
-		for entry in (None, "100", {"value": 100}, 1.5, True):
+		for entry in (None, {"value": 100}, 1.5, True):
 			with self.subTest(entry=entry):
 				got = chain._amount(entry)
 				self.assertIsNone(got, f"{entry!r} must be refused rather than truncated, got {got!r}")

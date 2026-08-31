@@ -2990,3 +2990,135 @@ overstated.
 hand-kept list, which is the kind of table this workspace has been bitten by.
 
 See D33, D43, D5.
+
+---
+
+## D46 · Ootle is a working rail, and everything it needed was one version behind — 2026-08-31
+
+the maintainer asked for testnet Ootle, rail first and then loyalty. Both work. What it
+cost was not design: it was that **every pinned dependency in the Ootle stack
+was a version behind a network that had moved**, and the first symptom looked
+like a dead testnet.
+
+### The blocker in the adapter was false
+
+`ootle.py` refused SETTLEMENT with *"the indexer cannot bind a shared-account
+balance change to a transaction"*, and `observe()` returned an unattributed
+balance delta with a warning saying so. Against indexer **0.39.3** that is
+simply not true:
+
+```
+GET /transactions/events/stream?substate_id=<vault>&topic=std.vault.deposit&after_id=<n>
+
+event: std.vault.deposit
+id: 247574
+data: {"transaction_id":"157954d6…","event":{"substate_id":"vault_eec5267f…",
+       "payload":{"amount":"1000000000","resource_address":"resource_0101…"}}}
+```
+
+Per-vault filtering, exact amounts, a transaction id, a monotonic cursor, and
+replay from `after_id=0`. **It is the best observation primitive of any rail
+here** — every other one rescans a range and can miss a payment between reads;
+this one resumes from the last event it saw and cannot.
+
+### It was not a testnet reset, and the epoch counter proves it
+
+Every address in `ootle-testnet/ADDRESSES.md` returned 404 on **both**
+indexers, including the account derived from the merchant's own key — while a
+substate from a receipt minted minutes earlier returned 200 from the same
+endpoint. But the epoch ran straight through: **9847** on 2026-07-27, **10092**
+on 2026-08-05, **10765** on 2026-08-31, about 53 minutes an epoch. A reset
+restarts the counter. This was an upgrade that took the state with it.
+
+### Five version drifts, each found by running something
+
+1. **The wire format.** `toolkit faucet` was refused by the indexer:
+   `unexpected type null at position 251: expected u64`. That field is
+   `max_epoch`, which `ootle-rs` 0.21 made a **required** argument to every
+   builder; 0.16 sent null. Bumped, and 18 call sites plus `receipt.logs()`
+   — removed from the struct in 0.39.3, `events` survives — were repaired.
+2. **A duplicated crate.** `tari_ootle_common_types` left at 0.37 dragged a
+   second `tari_engine_types` into the graph, and `want_substate` rejected its
+   own argument: *"expected `SubstateId`, found a different `SubstateId`"*.
+3. **Fees, twice.** `FAUCET_FEE` 1,000 against a required **2,182**; `CALL_FEE`
+   5,000 against a required **6,705**. Both executed and were rejected on
+   economics — the attempt spent for nothing, which the file's own comment
+   warns about. Unused budget is refunded; an insufficient one is not.
+4. **A response shape.** `chain._amount` refused a bare decimal string, and the
+   indexer answers `{"Stealth": {"revealed_amount": "999997692"}}`. The library
+   was rejecting its own live answer as "a shape this build does not
+   recognise". **This reversed a deliberate test** that asserted a bare string
+   *must* be refused rather than truncated; `_exact_integer` parses one exactly,
+   so nothing is truncated by accepting it, and floats, dicts and bools still
+   refuse.
+5. **Inside the WASM.** `loyalty award` was rejected by the engine:
+   `MintResourceArg … unexpected type array at position 4: expected u128`. An
+   `Amount` that used to serialise as an array is a `u128` now. The template was
+   rebuilt against `tari_template_lib` 0.31, which changed its address.
+
+### Two defects in the new adapter, both found live and neither by a test
+
+**The timestamp path was wrong, and the order was why.** The build order gave
+the *values* of `created_at` and `finalized_at` without their nesting, so the
+adapter read a flat `body["finalized_at"]` and its fixtures encoded the same
+assumption. Tests green, every real payment unstamped. The live shape is
+`transaction.summary.finalized_at`, checked across three real transactions. The
+first live settle said `needs-review, credited=0, sighted=1234000` — it saw the
+money and refused to credit it, which is the safe direction failing loudly.
+
+**The SSE reader threw away good data.** Charging inside the containers failed
+with *"the indexer did not answer: The read operation timed out"* while the
+frames of a real payment sat in the buffer. The endpoint replays and then holds
+the connection open; the host hands the reader four seconds. **A timeout with
+frames in hand is the end of the replay, not a failure** — the events are
+cursor-addressed, so a short read is a shorter answer and the next poll resumes
+from the last id. Only an empty payload is silence. (`OSError`, not
+`TimeoutError`: on 3.9 a read timeout arrives as `socket.timeout`, which is an
+OSError and not a TimeoutError.)
+
+### What is now true
+
+A sale charged in ERPNext on `xtr`, paid by a real customer account on
+esmeralda, settled by the library and booked:
+
+```
+CPS-2026-00438   $0.25 -> 5,000,000 microTari   confirmed / clean
+paid    ccd237c28eba345b45757997ffe908e3be29944329bfd9e2affbd5f41fce714a
+booked  ACC-SINV-2026-00100
+points  2,500 awarded against sale ref CPS-2026-00438; balance reads 2,500
+```
+
+`toolkit devbench pay` was added because **no verb sent stranger → merchant**:
+`open-account` goes the other way, `faucet` fills whoever signs, and `pocket` is
+offline by design. It is signed by a key on this workstation, so it proves the
+rail settles a real deposit — **not** that a stranger paid.
+
+### What did NOT change, deliberately
+
+**The binding is still the weakest one.** Deposits land in one shared merchant
+account, so `xtr` is D5's binding — `not-unconditional`, exactly as `rails.py`
+already declared. What improved is that a payment is now tied to a transaction
+id, so the claimed-set can stop a double credit. Ootle *can* do better: a
+payment component taking a sale reference would bind exactly, and that is a new
+contract rather than an adapter change.
+
+**The price is picked.** Tari is listed on no feed this build reads
+(`live_tari_watch.py`, 2026-08-28, "NOTHING CHANGED"), so `xtr` charges from
+`rates.DEMO_MICROCENTS`, which can never be reached in a real-money mode and
+comes back `ok=False`, sourced `demo-fixed`. That reversed a test asserting the
+demo table covers btc *and nothing else*. `rails.price_asset` says XTR should be
+priced as XTM and **no caller consults it** — D26 made charging row-driven, and
+the row says XTR. That gap is what must close before the entry can be deleted.
+
+### A live address that answers and cannot work
+
+The first republish, of the unmodified 0.29 crate, landed at
+`template_078d574b…` — byte-identical to the one recorded on 2026-08-14,
+because a template address is derived from its content — and the component on
+it reads a perfectly good `promise()` and fails every award. Both are recorded
+in `ADDRESSES.md` as unusable, because an address that resolves and answers is
+exactly the kind that gets believed.
+
+Gates: `make check` green — 100% line coverage, 2201/2212 mutants with the same
+11 documented equivalents as before, 3.9/3.11/3.13/3.14, wheel. See D5, D19,
+D26, D31, D33.

@@ -11,7 +11,7 @@ import unittest
 import urllib.error
 from decimal import Decimal
 
-from cryptopos_core import rates
+from cryptopos_core import rails, rates
 from cryptopos_core.errors import (
 	CryptoPosError,
 	FeedsDisagree,
@@ -300,10 +300,36 @@ class Constants(unittest.TestCase):
 		self.assertEqual(rates.DEMO_MICROCENTS["btc"], 64_000_000_000)
 		self.assertEqual(rates.DEMO_MICROCENTS["btc"] // rates.MICROCENTS_PER_USD, 64_000)
 
-	def test_the_demo_table_covers_btc_and_nothing_else(self):
-		# Every other rail raises rather than inventing a price, and that is
-		# the safe direction -- see `test_an_asset_with_no_fallback_refuses`.
-		self.assertEqual(set(rates.DEMO_MICROCENTS), {"btc"})
+	def test_the_demo_table_covers_only_assets_no_feed_will_price(self):
+		"""btc and xtr, and the reason they are both here is different.
+
+		Until 2026-08-31 this asserted `{"btc"}` and said every other rail
+		raises rather than inventing a price -- which is still the safe
+		direction and still true of every asset absent from this table.
+
+		`xtr` was added because Tari is listed on NONE of the feeds this build
+		reads. `live_tari_watch.py` re-measured it on 2026-08-28 and returned
+		"NOTHING CHANGED", with Coinbase answering 404 for XTM-USD. Without an
+		entry the rail raises `RateUnavailable` and cannot be charged at all,
+		even on a testnet where nothing is at stake -- so the choice was a
+		picked number or no Ootle rail.
+
+		A picked number is safe HERE and nowhere else, and that is enforced
+		rather than promised: `REAL_MONEY_MODES` can never reach this table,
+		and a quote drawn from it comes back `ok=False`, sourced `demo-fixed`.
+		The day two feeds list Tari, this entry should be deleted rather than
+		corrected.
+		"""
+		self.assertEqual(set(rates.DEMO_MICROCENTS), {"btc", "xtr"})
+
+	def test_the_xtr_demo_rate_is_the_five_cents_the_rail_table_picked(self):
+		self.assertEqual(rates.DEMO_MICROCENTS["xtr"], 50_000)
+		self.assertEqual(rails.RAILS["xtr"]["rate_cents"], 5)
+		self.assertEqual(
+			rates.DEMO_MICROCENTS["xtr"],
+			rails.RAILS["xtr"]["rate_cents"] * rates.MICROCENTS_PER_USD // 100,
+			"the demo price and the rail table's picked price must not drift apart",
+		)
 
 	def test_real_money_needs_two_feeds(self):
 		self.assertEqual(rates.MIN_FEEDS_FOR_REAL_MONEY, 2)

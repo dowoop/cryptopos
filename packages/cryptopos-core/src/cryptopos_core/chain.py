@@ -145,6 +145,79 @@ class OotleReader:
 		except (ValueError, TypeError, RecursionError) as exception:
 			return None, f"the indexer answered something that is not JSON: {exception}"
 
+	def _get_sse(self, path):
+		"""GET a bounded SSE replay. Returns (UTF-8 bytes, None) or (None, reason).
+
+		The transaction event endpoint stays open and sends ``:`` while idle.
+		That comment is the replay boundary: stop there instead of asking a
+		request handler to wait forever for a response body that never closes.
+		"""
+		if self._indexer_error:
+			return None, self._indexer_error
+		url = f"{self.indexer}/{path}"
+		try:
+			parsed = urllib.parse.urlsplit(self.indexer)
+			host = parsed.hostname
+		except (TypeError, ValueError):
+			return None, "the indexer address is not a valid URL"
+		secure = parsed.scheme.lower() == "https"
+		insecure_http = self.allow_insecure and parsed.scheme.lower() == "http"
+		if not host or not (secure or insecure_http):
+			return None, (
+				"the indexer must be an https:// address (or http:// when explicitly "
+				"allowed for local development)"
+			)
+		if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+			return None, "the indexer URL must not contain credentials, a query, or a fragment"
+
+		try:
+			request = urllib.request.Request(
+				url,
+				headers={"Accept": "text/event-stream", "User-Agent": self.user_agent},
+			)
+			payload = bytearray()
+			try:
+				with _urlopen(request, timeout=self.timeout) as response:
+					while True:
+						line = response.readline(MAX_RESPONSE_BYTES + 1 - len(payload))
+						payload.extend(line)
+						if len(payload) > MAX_RESPONSE_BYTES:
+							return None, f"the indexer response exceeded {MAX_RESPONSE_BYTES} bytes"
+						if not line or line.startswith(b":"):
+							break
+			except OSError:
+				# A TIMEOUT WITH FRAMES ALREADY IN HAND IS THE END OF THE
+				# REPLAY, NOT A FAILURE. The endpoint replays history and then
+				# holds the connection open, so the `:` comment above is the
+				# ordinary boundary -- but it only arrives when the server
+				# decides to send it, and the app hands this reader a 4 second
+				# budget. Measured 2026-08-31: charging on `xtr` inside the
+				# host's containers failed with "the indexer did not answer:
+				# The read operation timed out" while the frames for a real
+				# settled payment were already in `payload` and were thrown
+				# away with them.
+				#
+				# Discarding them would be worse than slow: the events are
+				# cursor-addressed, so a partial read is not a partial answer.
+				# It is a SHORTER answer, and the next poll resumes from the
+				# last id it did see. Nothing is skipped and nothing is
+				# double-counted. Only an empty payload is a real silence.
+				#
+				# `OSError` rather than `TimeoutError`: on 3.9 a read timeout
+				# arrives as `socket.timeout`, which is an OSError and NOT a
+				# TimeoutError. Catching the base covers both without importing
+				# `socket`, and any other read interruption after valid frames
+				# deserves the same treatment for the same reason.
+				if not payload:
+					raise
+			return bytes(payload), None
+		except urllib.error.HTTPError as exception:
+			return None, f"the indexer answered {exception.code} for {path}"
+		except (urllib.error.URLError, OSError) as exception:
+			return None, f"the indexer did not answer: {exception}"
+		except (TypeError, ValueError) as exception:
+			return None, f"the indexer answered an invalid event stream: {exception}"
+
 	def available(self):
 		"""Is the policy layer reachable at all? Never raises."""
 		body, reason = self._get("network")
@@ -262,25 +335,9 @@ class OotleReader:
 		payment rail. A confidential container is deliberately unreadable: its
 		revealed amount is only a floor, not the account's balance.
 		"""
-		if not account:
-			return None, "no account given"
-		if not isinstance(resource, str) or not resource:
-			return None, "the resource must be non-empty text"
-
-		body, reason = self._get(f"substates/{account}")
-		if body is None:
+		found, reason = self.resource_vault(account, resource)
+		if reason is not None:
 			return None, reason
-
-		try:
-			vaults = body["substate"]["Component"]["body"]["state"]
-		except (KeyError, TypeError):
-			return None, "the account answered in a shape this build does not recognise"
-
-		# Walk the account's vaults for one holding this resource. An account
-		# with no such vault is a customer who has never been awarded -- that is
-		# zero, and it is not an error.
-		wanted = resource.removeprefix("resource_")
-		found = _walk_for_resource(vaults, wanted)
 		if found is None:
 			return 0, None
 
@@ -288,6 +345,21 @@ class OotleReader:
 		if vault_body is None:
 			return None, reason
 		return _balance_of(vault_body)
+
+	def resource_vault(self, account, resource):
+		"""Resolve the vault holding ``resource`` in an account's public state."""
+		if not account:
+			return None, "no account given"
+		if not isinstance(resource, str) or not resource:
+			return None, "the resource must be non-empty text"
+		body, reason = self._get(f"substates/{account}")
+		if body is None:
+			return None, reason
+		try:
+			vaults = body["substate"]["Component"]["body"]["state"]
+		except (KeyError, TypeError):
+			return None, "the account answered in a shape this build does not recognise"
+		return _walk_for_resource(vaults, resource.removeprefix("resource_")), None
 
 	def check_it_yourself(self, facts, account=""):
 		"""The literal URLs a customer can open to check the promise themselves."""
@@ -368,6 +440,14 @@ def _amount(entry):
 		return _exact_integer(entry[0])
 	if isinstance(entry, int) and not isinstance(entry, bool):
 		return entry
+	# A BARE DECIMAL STRING, which is what esmeralda's 0.39.3 indexer answers
+	# with. Measured 2026-08-30: a funded account's vault returned
+	# `{"Stealth": {"revealed_amount": "999997692", "locked_amount": "0"}}`,
+	# and without this branch `_balance_of` refused its own live answer as "a
+	# shape this build does not recognise". `_exact_integer` already decodes a
+	# string without truncating it, so this routes rather than reimplements.
+	if isinstance(entry, str):
+		return _exact_integer(entry)
 	return None
 
 

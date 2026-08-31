@@ -7,7 +7,7 @@ The public surfaces separate mechanism from host policy:
     catalog  every built-in rail, including honest partial capability reports
     bitcoin  verified Bitcoin Testnet 4 observation and settlement
     evm      verified Sepolia and Amoy observation and settlement
-    ootle    final balance observation without false transaction attribution
+    ootle    final, transaction-attributed Ootle vault deposits and settlement
 
     rates    quoting an asset in microcents, under stricter rules when the
              money is real; converting cents to exact native units

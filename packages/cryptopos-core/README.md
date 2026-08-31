@@ -100,7 +100,7 @@ names exist.
 | Dash testnet / TDASH | yes | no | no | Insight observer not extracted; Insight cannot prove ChainLocks |
 | Zcash testnet / TAZEC | yes | no | no | no reliable keyless address provider is configured |
 | Monero stagenet / XMR | no | no | no | held back until stagenet validation and a view-only sidecar are integrated |
-| Ootle Esmeralda / XTR | no standard URI | balance delta | never | indexer proves final balance movement but cannot attribute a transaction |
+| Ootle Esmeralda / XTR | account address (no registered URI) | attributed vault deposits | committed/final | shared-account exact-amount binding; resumable indexer event cursor |
 
 This table is deliberately asymmetric. Breadth belongs in the registry;
 chargeability belongs in runtime readiness. Adding an asset never makes it

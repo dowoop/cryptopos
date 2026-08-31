@@ -83,10 +83,11 @@ expiry enters review instead of settlement.
 * **That the policy tier read is mainnet.** The default indexer is testnet and
   there is no published mainnet one. `promise()` returns the indexer that
   answered; display it.
-* **Transaction attribution from an Ootle shared-account balance.** The
-  Esmeralda indexer can prove that the XTR vault rose and that committed state
-  is final, but it cannot enumerate the transaction that caused the change.
-  The plugin reports `unattributed_native` and has no settlement capability.
+* **Per-sale binding for Ootle's shared account.** Esmeralda's filtered vault
+  event stream attributes each final deposit to a transaction ID and exact
+  amount, so the claimed-transaction set prevents double credit. It does not
+  give the payment a sale reference or unique recipient: attribution still
+  relies on the static account plus exact amount inside the lock window.
 * **The payer wallet's Bitcoin or Solana network selection.** BIP-21 does not
   encode Testnet 4, and Solana Pay does not encode a cluster. The observer is
   network-verified; the host must still tell the payer which wallet network to

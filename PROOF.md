@@ -125,8 +125,8 @@ strings, and the short-checksum case solved algebraically rather than searched.
 |---|---|---|
 | `RequestRail`, `RequestRail.readiness`, `RequestRail.validate_recipient`, `RequestRail.capture_baseline`, `RequestRail.create_request`, `RequestRail.observe`, `RequestRail._intent` | truthful request-only adapters: build what is supported and raise instead of simulating observation or settlement | `test_catalog`, `RequestRailBoundaries` |
 | `builtin_rails` | the explicit twelve-rail built-in catalog used by opt-in registration | `test_catalog.CatalogIdentity` |
-| `OotleEsmeralda`, `OotleEsmeralda.validate_recipient`, `OotleEsmeralda.readiness`, `OotleEsmeralda.capture_baseline`, `OotleEsmeralda.create_request`, `OotleEsmeralda.observe` | observe XTR balance movement while refusing payer-URI and transaction-attribution claims | `test_ootle`, `OotleBoundaries` |
-| `OotleEsmeralda._reader`, `OotleEsmeralda._network`, `OotleEsmeralda._intent` | bind reads to one Esmeralda indexer, monotonic epoch, and payment intent | `OotleBoundaries` |
+| `_event_replay`, `_finalized_epoch`, `_summary_field`, `OotleEsmeralda`, `OotleEsmeralda.validate_recipient`, `OotleEsmeralda.readiness`, `OotleEsmeralda.capture_baseline`, `OotleEsmeralda.create_request`, `OotleEsmeralda.observe` | decode a bounded vault-deposit SSE replay into transaction-attributed XTR transfers, with the transaction's UTC `finalized_at` as its conservative payment time; issue a truthful address instruction because no registered Ootle payment URI exists | `test_ootle.OotleRailTest`, `EventReplayBoundaries`, `OotleBoundaries`, `SummaryField` |
+| `OotleEsmeralda._events`, `OotleEsmeralda._transfers`, `OotleEsmeralda._vault`, `OotleEsmeralda._reader`, `OotleEsmeralda._network`, `OotleEsmeralda._intent` | bind exact integer deposits to one resolved XTR vault, one Esmeralda indexer, one resumable event cursor, and one payment intent | `test_ootle.OotleRailTest`, `OotleBoundaries` |
 | `validate_plugin`, `RailRegistry`, `RailRegistry.register`, `RailRegistry.keys`, `RailRegistry.discover`, `RailRegistry.register_builtins` | validate identity, capabilities, and initial/resumed method call shapes; discover and deduplicate independently installed rails with no import-time side effects | `test_plugin.Registry`, `RegistryBoundaries`, packaging discovery tests |
 | `conformance_issues`, `require_conformant` | convert third-party structural/readiness mistakes into stable host-visible findings | `test_conformance`, `ConformanceBoundaries` |
 
@@ -216,11 +216,11 @@ failure, always — `test_chain.Totality`.
 |---|---|---|
 | `OotleReader` | the reader itself: one object, configured at construction, that reads the policy tier keylessly and feelessly | `Construction` |
 | `OotleReader.__init__` | takes its configuration at construction, so the same reader works from a till, a backend or a bare script | `Construction` |
-| `OotleReader._get` | one GET, returning `(body, None)` or `(None, reason)`; refuses plain http before touching the network | `Availability`, `TransportSecurity` |
+| `OotleReader._get`, `OotleReader._get_sse` | bounded JSON and idle-bounded SSE GETs, returning data or a reason; both refuse plain http before touching the network | `Availability`, `TransportSecurity`, `SseTransportBoundaries` |
 | `OotleReader.available` | is the policy layer reachable at all | `Availability`, `ShapesThatAreNotTheContract` |
 | `OotleReader.promise` | the deployed contract's own account of itself — rate, ceilings, resources | `Promise`, `Provenance`, `SlotLayout`, `ShapesThatAreNotTheContract` |
 | `OotleReader.points_balance` | a customer's balance. **Zero and unreadable are different answers** and are returned differently. Never on the path of a sale | `PointsBalance`, `TheVaultRead` |
-| `OotleReader.resource_balance` | a public account's balance for an explicitly named resource, used by the XTR observer without granting transaction attribution | `test_ootle`, `OotleBoundaries` |
+| `OotleReader.resource_balance`, `OotleReader.resource_vault` | resolve the resource-to-vault CBOR pair and read a public balance; the payment rail separately uses the resolved vault to filter attributed deposit events | `test_chain.TheVaultRead`, `test_ootle.OotleRailTest`, `OotleBoundaries` |
 | `OotleReader.check_it_yourself` | the literal URLs a customer can open to check the promise themselves | `Wording` |
 | `_NoDowngradeRedirects` | a redirect handler installed **unconditionally**, including for `allow_insecure` readers — it only fires when the request was https, so one opener has one behaviour and nothing can be configured wrong | `TransportSecurity` |
 | `_NoDowngradeRedirects.redirect_request` | follow redirects, never https → http. Without it the scheme check is decoration | `TransportSecurity` |

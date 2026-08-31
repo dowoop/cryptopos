@@ -194,17 +194,33 @@ class RegistryBoundaries(unittest.TestCase):
 
 class OotleBoundaries(unittest.TestCase):
 	class Reader:
-		def __init__(self, indexer="https://ootle.example", body=None, balance=100, reason=None):
+		def __init__(
+			self,
+			indexer="https://ootle.example",
+			body=None,
+			balance=100,
+			reason=None,
+			vault="vault_" + "e" * 64,
+			stream=b":\n",
+		):
 			self.indexer = indexer
 			self.body = {"network": "esmeralda", "epoch": 6} if body is None else body
 			self.balance = balance
 			self.reason = reason
+			self.vault = vault
+			self.stream = stream
 
 		def _get(self, path):
 			return self.body, self.reason
 
+		def _get_sse(self, path):
+			return self.stream, self.reason
+
 		def resource_balance(self, recipient, resource):
 			return self.balance, self.reason
+
+		def resource_vault(self, recipient, resource):
+			return self.vault, self.reason
 
 	def setUp(self):
 		self.rail = OotleEsmeralda()
@@ -223,7 +239,7 @@ class OotleBoundaries(unittest.TestCase):
 		with self.assertRaises(InvalidRailPlugin):
 			self.rail.observe(without_baseline, {})
 
-	def test_observation_revalidates_previous_provider_epoch_and_balance(self):
+	def test_observation_revalidates_previous_provider_and_event_stream(self):
 		previous = ObservationBatch(
 			self.rail.key,
 			"sale",
@@ -234,36 +250,29 @@ class OotleBoundaries(unittest.TestCase):
 			5,
 			6,
 			(),
-			10,
 		)
 		with mock.patch.object(self.rail, "_reader", return_value=self.Reader()):
 			observed = self.rail.observe(self.intent, {}, previous)
-		self.assertEqual(observed.unattributed_native, 10)
+		self.assertEqual(observed.observed_through_tip, 6)
 		for reader in (
 			self.Reader(indexer="https://other.example"),
-			self.Reader(body={"network": "esmeralda", "epoch": 4}),
-			self.Reader(balance=None, reason="unreadable"),
+			self.Reader(stream=None, reason="unreadable"),
+			self.Reader(vault=None),
 		):
 			with self.subTest(reader=reader), mock.patch.object(self.rail, "_reader", return_value=reader):
 				with self.assertRaises(RailProviderError):
 					self.rail.observe(self.intent, {})
 
-	def test_equal_epoch_and_unit_balance_deltas_have_distinct_meanings(self):
-		for epoch, balance, warning in (
-			(5, 90, None),
-			(6, 91, "increased"),
-			(6, 89, "fell"),
-		):
-			reader = self.Reader(body={"network": "esmeralda", "epoch": epoch}, balance=balance)
+	def test_network_epoch_does_not_replace_the_event_cursor(self):
+		for epoch in (5, 6):
+			reader = self.Reader(body={"network": "esmeralda", "epoch": epoch})
 			with (
-				self.subTest(epoch=epoch, balance=balance),
+				self.subTest(epoch=epoch),
 				mock.patch.object(self.rail, "_reader", return_value=reader),
 			):
 				observed = self.rail.observe(self.intent, {})
-			if warning is None:
-				self.assertEqual(observed.warnings, ())
-			else:
-				self.assertIn(warning, observed.warnings[0])
+			self.assertEqual(observed.observed_after_tip, 5)
+			self.assertEqual(observed.observed_through_tip, 5)
 
 	def test_reader_and_network_inputs_are_strict(self):
 		for configuration in (
