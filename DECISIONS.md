@@ -4474,3 +4474,25 @@ nothing, and not off-site.
 throwaway-site command. A backup nobody has restored is a rumour.
 
 See D1, D2, D19, D31, D62.
+
+### Addendum, same day: a recreate dropped a rail and the gate said OK
+
+Applying the address pins needed a full `down`/`up`, and that removed the
+Solana rail plugin from all four containers — it is `pip install`ed into them,
+not baked into the image. **`rails_agree.sh` reported "all four processes drive
+the same rails" the entire time**, because they agreed perfectly about a
+capability none of them had. That gate asks about agreement; nothing asked
+about capability.
+
+The only thing that noticed was the app harness, which failed with `name
+'cryptopos' is not defined` — an error naming neither pip nor the plugin.
+
+`health.sh` now asks whether every ENABLED rail is driveable, and
+`install_plugins.sh` is the recovery. It needs `--no-deps`: the plugin declares
+`cryptopos-core>=1.1`, core arrives on PYTHONPATH from the bind mount rather
+than through pip, and a plain install refuses to resolve its own dependency.
+
+The durable fix is baking the plugins into the image so a recreate cannot drop
+them. That is not done. Until it is, this is detection plus a one-command
+recovery, which is honest but is not the same thing.
+
