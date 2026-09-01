@@ -4358,3 +4358,119 @@ unscoped surfaces are answered by there being one trusted principal, which is a
 hosting decision and not a repair.
 
 See D37, D57, D60, D61, and `CONTINUE.md` §1 Decision 2, §7.
+
+## D63 · What it took to be comfortable leaving this running — 2026-09-01
+
+Published is not hosted. D62 put `<the published hostname>` behind Access; this is
+what stood between that and something worth leaving up.
+
+### The 502 was a recurring outage, and it is now impossible rather than watched
+
+`origin_probe.sh` detected it. Detection was the wrong fix. The frontend's
+generated `frappe.conf` declares `upstream backend-server { server backend:8000; }`
+with **no `resolver`**, so nginx resolves that name once at config load and
+caches the address for the life of the process — and every backend restart
+handed it a new one. Two hours of 502 on 2026-08-31 came from a routine
+restart.
+
+`compose.custom.yaml` now pins `backend` to `172.21.0.10` and `websocket` to
+`172.21.0.5` on a declared subnet. Verified the only way that counts: the
+backend was restarted, kept its address, and nginx served **200 throughout**
+with no reload. `frappe.conf` is regenerated from a template at every start, so
+editing it in place is lost; bind-mounting a patched template would shadow the
+image's own copy and go stale at the next upgrade. One line of addressing beats
+both.
+
+**Applying it cost an outage, which is the honest part.** Declaring `ipam` on a
+network Docker had already created without one leaves it half-applied: the
+websocket and both queues lost their addresses, `ENOTFOUND redis-queue`, and
+the site went to 500. It needed a full `down`/`up` — volumes intact, checked
+before and after — to take effect. A network change is not a hot edit.
+
+### There were no backups. None.
+
+Ninety-odd sales, real Sales Invoices booked against real testnet payments, and
+the database in a Docker volume one `down -v` from gone. The chain still holds
+the payments; *which sale a payment settled, which invoice it booked and what
+an operator decided about a review* exist only here.
+
+`backup.sh` runs daily under a systemd timer and verifies rather than hopes:
+`bench backup` exited 0, the files exist and are non-empty, the gzip streams
+pass `gzip -t`, the dump contains this app's tables — **and the live database's
+newest sale appears in it**, which is what proves the dump is this database and
+is current. Both failure paths were seen red: a truncated dump, and a
+well-formed one missing that sale.
+
+The first version counted `INSERT INTO` statements and reported "1 sale
+insert statement(s)" against a database holding eighty. mysqldump packs
+thousands of rows into one statement, so the number was true and meaningless.
+
+It also captures the six files in `frappe_docker/` that **git cannot version** —
+including `compose.custom.yaml`, which holds the loopback pin and the addresses
+above. A database restored without them comes back exposed and flaky.
+
+### Nothing watched it, and the first monitor I wrote lied twice
+
+`health.sh`, every fifteen minutes: the published URL reaches the **Access**
+login and not Frappe, the tunnel service is up, lingering is on, the origin
+serves and refuses every non-loopback address, nine containers, the four
+workers agree, no settled sale is missing its invoice, the scheduler ticked,
+the booking sweep ran, backups are recent, disk headroom.
+
+Two of those checks were wrong when written, and the negative controls are what
+found it — not the checks passing:
+
+1. It read `Scheduled Job Log` as a heartbeat and reported *"the scheduler has
+   not run a job for 2706s — the booking sweep is not running"* on its first
+   execution, while `cryptopos.watch.heartbeat` had run **seventeen seconds**
+   earlier. Frappe writes that table only for jobs configured to log or ones
+   that failed. `Scheduled Job Type.last_execution` updates on every run.
+2. The corrected version then **passed** a `last_execution` seven hours in the
+   future — the site runs `America/Adak` against a UTC database — because it
+   tested only `< 600`. A negative age read as recent. In this repository, of
+   all places: D19 was a timezone making every payment look late. A guard that
+   reads an impossible time as healthy fails open on exactly that.
+
+A monitor that cries wolf is worse than none, because it teaches you to ignore
+it. Both directions are now asserted.
+
+### Survives a reboot, and each part was checked separately
+
+`cloudflared` was a process started by hand. It is now a **user** systemd
+service — no root needed — with `loginctl enable-linger "$USER"`, which the user
+was permitted to set for themselves, making it a boot service rather than a
+login-session one. `Restart=always`, and proven: `kill -9` on the main PID
+brought it back and the site answered within seconds. Docker is enabled, all
+nine containers are `unless-stopped`, and both timers are enabled.
+
+`health.sh` asserts lingering, because without it the unit file makes a promise
+it does not keep.
+
+### Capacity, which was the other half of the question
+
+The published rail is `xtr` and visitors pay from their own wallets, so the
+number that matters is whether the merchant can keep paying fees: **977.14 XTR
+against 3,493 µT per call — about 279,000 calls.** Not a constraint.
+
+`runway.py`'s headline says the instance can serve **0** more sales, and that is
+about `pol`, which is not offered publicly and never was (§1 Decision 3). Its
+`xtr` figure of 197 is the *dev-bench customer's* wallet, which a public
+visitor does not use. Reading either as the published instance's capacity would
+be wrong in opposite directions.
+
+### What is still not true
+
+`cloudflared` is a **user** service: if lingering is ever cleared, it silently
+stops being a boot service. The health check watches for that.
+
+**The journal is the alerting.** Nothing pages anybody. A failing check marks
+the unit failed and writes to `journalctl --user -u cryptopos-health`; if
+nobody looks, nobody knows.
+
+**The backups are on the same disk as the thing they protect.** Better than
+nothing, and not off-site.
+
+**No backup has been restored.** The script says so itself and gives the
+throwaway-site command. A backup nobody has restored is a rumour.
+
+See D1, D2, D19, D31, D62.
