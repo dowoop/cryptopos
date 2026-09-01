@@ -31,6 +31,7 @@ from cryptopos_core.plugin import (
 	OBSERVATION,
 	PAYMENT_REQUEST,
 	SETTLEMENT,
+	UNCONDITIONAL_PER_SALE,
 	PaymentIntent,
 	RecipientBaseline,
 	binding_category_for,
@@ -203,6 +204,80 @@ def plugins():
 	return dict(registry)
 
 
+#: What a rail is configured to receive WITH. Ordered strongest first, and
+#: the first two are the ones that bind a payment to one sale.
+XPUB, COMPONENT, STATIC_ADDRESS = "xpub", "component", "address"
+
+
+def receiving_material(rail, mode):
+	"""What this rail receives with, WITHOUT allocating any of it.
+
+	Pure: it reads the row and returns. That is the whole point of its
+	existence, because `recipient_for` answers a different question --
+	*give me the address to put on this sale* -- and answering it DERIVES a
+	fresh address, advances `next_address_index` and takes a `FOR UPDATE` row
+	lock while it does.
+
+	**Asking that function a yes/no question spends one of the operator's
+	addresses per question, and `binding_label` was asking it one.** Measured
+	2026-08-31: a single `api.rails()` -- what a till does every time it draws
+	its rail list -- moved `btc`'s `next_address_index` from 2 to 3, with no
+	sale in existence. `charge()` was worse: it called `recipient_for` for the
+	address and then `binding_label` called it AGAIN, so every real Bitcoin
+	sale consumed two indices and recorded the first. Nothing was stolen and
+	no money was lost -- an xpub can re-derive any index -- but the skipped
+	addresses eat BIP-44's twenty-address gap limit at twice the rate, and
+	past the gap a restored wallet stops scanning and does not find the money.
+
+	It is also the same shape as the defect it was introduced fixing: a
+	function whose name says it reports, doing something underneath.
+	"""
+	if mode != "testnet":
+		# Mainnet is refused upstream and demo deliberately has no recipient,
+		# so neither can receive anything and neither has a binding to label.
+		return ""
+	if (getattr(rail, "testnet_xpub", "") or "").strip():
+		return XPUB
+	if (getattr(rail, "payment_component", "") or "").strip():
+		return COMPONENT
+	if (getattr(rail, "testnet_recipient", "") or "").strip():
+		return STATIC_ADDRESS
+	return ""
+
+
+def binding_label(rail, mode):
+	"""`per-sale`, `shared`, or "" when nothing can receive. ONE implementation.
+
+	Three callers compute this -- the sale record at charge time, the rails
+	list a till draws from, and `tools/snapshot.py` -- and until 2026-08-31
+	they each had their own copy of the rule. D35 is what that costs: a rule
+	in three places drifted in the one nobody searched for, under a docstring
+	saying it was checked. D54 merged the first two and did not find the
+	third, which then reported `xtr` as SHARED for a day while the till
+	correctly reported it as per-sale.
+
+	**Configuration, not adapter declaration, decides this.** D45 established
+	that `binding_category` is a claim about an ADAPTER; whether a DEPLOYMENT
+	binds per sale additionally depends on how the operator configured it. The
+	same Ootle adapter is `shared` pointed at a plain account and per-sale
+	pointed at a payment component, and the adapter's own declaration cannot
+	know which. So the static declaration is read here but never overridden.
+	"""
+	material = receiving_material(rail, mode)
+	if not material:
+		return ""
+	# A fresh address per sale from the merchant's xpub, or a payment
+	# component the payer names the sale on. Both are FACTS about where the
+	# money lands, rather than claims an adapter makes about itself.
+	if material in (XPUB, COMPONENT):
+		return "per-sale"
+	# Or the adapter binds per sale on its own, the way a Solana Pay reference
+	# does.
+	if declared_binding_category(plugin_for(rail)) == UNCONDITIONAL_PER_SALE:
+		return "per-sale"
+	return "shared"
+
+
 def declared_binding_category(adapter):
 	"""Resolve a declaration without making pre-category plugins disappear.
 
@@ -325,7 +400,14 @@ def configuration_for(rail, mode):
 			).format(rail.label, mode),
 			title=_("No endpoint"),
 		)
-	return {"endpoint": endpoint}
+	configuration = {"endpoint": endpoint}
+	# Only when the row names one. An adapter that does not read this ignores
+	# it, and the Ootle adapter falls back to its shared-account path -- which
+	# is what D48 measured and what the rail README warns about in a box.
+	component = (rail.get("payment_component") or "").strip()
+	if component:
+		configuration["payment_component"] = component
+	return configuration
 
 
 # Rail families whose adapter requires a receiving address that has never been

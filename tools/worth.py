@@ -84,11 +84,6 @@ EQUIVALENT = {
 	# bits. Bit 5 is never set, so a sixth round reads no generator and
 	# changes nothing. (Checked over random inputs: max `top` seen is 31.)
 	"addresses.py:100:5 -> 6": "top is 5 bits wide, so a sixth generator round never fires",
-	# The charset lookup uses str.find, which answers -1 and no other negative
-	# value. Comparing against -2 leaves the -1 in the data, and the checksum
-	# then rejects exactly the same strings -- the guard is a fast path, not
-	# the thing doing the rejecting. (30,000 random strings: zero disagreements.)
-	"addresses.py:127:1 -> 2": "str.find answers only -1; the checksum rejects the same inputs anyway",
 	# The accumulator's bits above `bits` are always masked off before they
 	# reach the output, so seeding it with 1 rather than 0 cannot be observed.
 	# (Checked over 3,000 random inputs in both padding directions.)
@@ -99,30 +94,39 @@ EQUIVALENT = {
 	"addresses.py:219:63 -> 64": "shift steps in sevens: 63 and 64 are the same cut, between 63 and 70",
 	# `int(character, 16)` on a SINGLE character. Base 17 adds only 'g', and a
 	# hex digest never contains one, so every digit parses to the same value.
-	# The 40-character body at line 331 is a different matter and is killed by
-	# the 'g' test.
-	"addresses.py:383:16 -> 17": "single hex character: base 16 and 17 agree on every digit 0-f",
+	# The 40-character body a few lines up is a different matter and is killed
+	# by the 'g' test.
 	"addresses.py:458:16 -> 17": "single hex character: base 16 and 17 agree on every digit 0-f",
 	# Reading limit+1 is the canonical bounded-read idiom. Any positive excess
 	# has identical observable behavior: bodies <= limit are returned whole;
 	# bodies > limit yield more than limit and are refused. Reading limit+2
 	# cannot admit or reject a different body.
 	"chain.py:137:1 -> 2": "any positive read excess detects exactly the same oversized bodies",
-	"rates.py:134:1 -> 2": "any positive read excess detects exactly the same oversized bodies",
 	# `ObservationBatch.extend` refuses if either operand carries an
 	# unattributed balance snapshot, so both values are necessarily zero here.
 	# Adding or subtracting zero produces the same cumulative batch.
-	"plugin.py:379:Add -> Sub": "both amounts are guarded to zero before they are combined",
-	# A minimally valid ERC-20 log is over 200 JSON bytes. Twenty thousand of
-	# them cannot fit through the four-megabyte `_rpc` response ceiling, so the
-	# parser's exact 20,000/20,001 boundary is unreachable after the wire bound.
-	"evm.py:404:Gt -> GtE": "the response-byte ceiling prevents 20,000 valid logs reaching this parser",
-	# Readiness is queried by capability name. Inserting the two unavailable
-	# entries at index zero or one changes only tuple presentation order, not
-	# membership, reasons, chargeability, or conformance behavior.
-	"catalog.py:60:0 -> 1": "unavailable capability ordering is not part of the readiness contract",
-	"catalog.py:62:0 -> 1": "unavailable capability ordering is not part of the readiness contract",
+	"plugin.py:413:Add -> Sub": "both amounts are guarded to zero before they are combined",
 }
+
+# SIX ENTRIES WERE DELETED FROM THAT LIST ON 2026-08-31, and finding them is
+# what the staleness check below exists for. Every key here is a LINE NUMBER,
+# and line numbers move: `plugin.py:379` became `plugin.py:394` when a field
+# was added above it, and the gate then reported a survivor that had been
+# explained and triaged long before. The five others had drifted the same way
+# without anybody noticing, because a triage entry that stops matching fails
+# silently in the direction of MORE work, not less -- so it never looks like a
+# defect in the list.
+#
+# Re-checked one module at a time before they were removed: `rates.py` 108/108,
+# `evm.py` 264/264 and `catalog.py` 32/32 all kill every mutant they produce,
+# and `addresses.py:127` is killed at its new line. The excuses were obsolete,
+# not merely misfiled -- the suite had grown past all six. They were:
+#
+#   addresses.py:127  str.find answers only -1        (now killed)
+#   addresses.py:383  single-character int(x, 16)     (merged into :458)
+#   catalog.py:60,62  unavailable-capability ordering (now killed)
+#   evm.py:404        the 20,000-log parser boundary  (now killed)
+#   rates.py:134      bounded-read excess of one      (now killed)
 
 
 # ---------------------------------------------------------------------------
@@ -354,13 +358,37 @@ def main():
 	by_file = {}
 	survivors = []
 	accepted = []
+	seen = set()
 	for filename, line, description, killed in results:
 		total, dead = by_file.get(filename, (0, 0))
 		by_file[filename] = (total + 1, dead + (1 if killed else 0))
+		key = f"{filename}:{line}:{description}"
+		seen.add(key)
 		if killed:
 			continue
-		key = f"{filename}:{line}:{description}"
 		(accepted if key in EQUIVALENT else survivors).append((filename, line, description, key))
+
+	# AN EQUIVALENT KEY IS A LINE NUMBER, AND LINE NUMBERS MOVE.
+	#
+	# Found 2026-08-31, the expensive way. `plugin.py:379:Add -> Sub` was
+	# triaged with a correct reason; fifteen lines were then inserted above it
+	# and the entry silently stopped matching anything. The gate reported a
+	# survivor that had been explained months earlier, and there was nothing
+	# to say the explanation still existed. The opposite direction is worse:
+	# an entry that keeps matching a mutant the suite has since learned to
+	# kill is a standing excuse for an assertion that is now doing its job.
+	#
+	# So the triage list is checked against the run rather than trusted: every
+	# entry must name a mutation that this run actually PRODUCED and that
+	# actually SURVIVED. Anything else is a claim about code that has moved.
+	# `--module` mutates one file, so only that file's entries are checked.
+	scope = {options.module} if options.module else {job[0] for job in jobs}
+	still_accepted = {key for _f, _l, _d, key in accepted}
+	stale = sorted(
+		key
+		for key in EQUIVALENT
+		if key.split(":", 1)[0] in scope and key not in still_accepted
+	)
 
 	print()
 	width = max(len(name) for name in by_file)
@@ -392,6 +420,21 @@ def main():
 		print()
 		print(f"  {DIM}Either strengthen the assertion, or add the mutant to EQUIVALENT{RESET}")
 		print(f"  {DIM}in {Path(__file__).name} with the reason it cannot be killed.{RESET}")
+		print()
+
+	if stale:
+		print(
+			f"  {RED}{BOLD}{len(stale)} EQUIVALENT entr(ies) no longer apply{RESET} — "
+			"a triage that has stopped describing this code"
+		)
+		for key in stale:
+			produced = "the suite now kills it" if key in seen else "no mutation is produced there"
+			print(f"      {key}   {DIM}({produced}){RESET}")
+			print(f"        {DIM}{EQUIVALENT[key]}{RESET}")
+		print()
+		print(f"  {DIM}Re-check the reason against the code, then move or delete the entry.{RESET}")
+
+	if survivors or stale:
 		return 1
 
 	print(

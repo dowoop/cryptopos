@@ -7,7 +7,6 @@ from frappe import _
 
 from cryptopos import charge as charge_module
 from cryptopos import watch as watch_module
-from cryptopos_core.plugin import UNCONDITIONAL_PER_SALE
 
 
 @frappe.whitelist()
@@ -26,6 +25,19 @@ def poll(sale_name):
 	return status(sale_name)
 
 
+def _extras(sale):
+	"""The sale's charge-time snapshot, or an empty mapping.
+
+	Total on purpose: a surface asking what to tell the payer must never fail
+	because a record is older than the field it is asking for.
+	"""
+	try:
+		extras = json.loads(sale.identity_extras or "{}")
+	except (TypeError, ValueError):
+		return {}
+	return extras if isinstance(extras, dict) else {}
+
+
 @frappe.whitelist()
 def status(sale_name):
 	"""Everything a surface needs to draw one sale honestly."""
@@ -42,6 +54,15 @@ def status(sale_name):
 		"mode": sale.mode,
 		"provenance": sale.provenance,
 		"uri": sale.uri,
+		# THE INSTRUCTION, and it was stored and never shown until 2026-08-31.
+		# `charge` has written `payer_notice` into `identity_extras` all along,
+		# and no surface returned it -- so on a payment-component rail the
+		# customer was handed an address and never told that a payment must
+		# NAME the sale. Found the expensive way: a real 5,000,000 uT payment
+		# was made to the right component, for the right amount, naming the
+		# wrong reference, and was correctly refused by the binding and
+		# stranded. The binding worked; the surface had not said what to name.
+		"payer_notice": _extras(sale).get("payer_notice", ""),
 		"qr_modules": json.loads(sale.qr_modules) if sale.qr_modules else None,
 		"usd_cents": sale.usd_cents,
 		"invoiced_native": sale.invoiced_native,
@@ -213,7 +234,11 @@ def rails(with_readiness=0):
 	from cryptopos import catalog
 
 	with_readiness = bool(int(with_readiness or 0))
-	mode = frappe.get_single("CryptoPoS Settings").mode if with_readiness else None
+	# ALWAYS, not only when readiness is asked for. `binding_label` needs the
+	# mode to know where a rail receives, and passing None made every rail
+	# report an empty binding -- a whole column of the till going blank because
+	# a variable was computed conditionally for a different caller's benefit.
+	mode = frappe.get_single("CryptoPoS Settings").mode
 	rows = frappe.get_all(
 		"Crypto Rail",
 		filters={"enabled": 1},
@@ -233,8 +258,7 @@ def rails(with_readiness=0):
 	for row in rows:
 		derives = bool((row.pop("testnet_xpub", "") or "").strip())
 		rail = frappe.get_doc("Crypto Rail", row["name"])
-		declared = catalog.declared_binding_category(catalog.plugin_for(rail))
-		row["binding"] = "per-sale" if declared == UNCONDITIONAL_PER_SALE or derives else "shared"
+		row["binding"] = catalog.binding_label(rail, mode)
 		row["gap_run"] = catalog.gap_run_for(rail) if derives else 0
 		row["gap_limit"] = catalog.GAP_LIMIT
 		if with_readiness:

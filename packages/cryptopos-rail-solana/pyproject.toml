@@ -3,7 +3,17 @@ name = "cryptopos-rail-solana"
 version = "0.1.0"
 description = "A dependency-free Solana devnet SOL payment rail for CryptoPoS."
 requires-python = ">=3.9"
-dependencies = []
+# NOT EMPTY, and it was until 2026-08-31. This package imports
+# `cryptopos_core.{addresses,errors,plugin,uri}` and declared nothing, so it
+# installed cleanly into an environment where it could not run and only worked
+# because the host happened to have core installed already. An undeclared
+# dependency is the same defect class as D43's required field: the wheel a
+# deployment actually installs is not the source the tests exercise.
+#
+# `>=1.1` rather than `==`: the plugin uses the PaymentRail protocol and the
+# address/URI helpers, all of which are covered by the frozen API. A pin would
+# make every core patch release a plugin release.
+dependencies = ["cryptopos-core>=1.1"]
 
 [project.entry-points."cryptopos.rails"]
 solana-devnet-sol = "cryptopos_rail_solana:solana_devnet_sol"

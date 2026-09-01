@@ -159,6 +159,8 @@ class ObservationBoundaries(unittest.TestCase):
 			{"transfers": [transfer()]},
 			{"transfers": (transfer(block_height=5),)},
 			{"unattributed_native": -1},
+			{"unresolved_transaction_ids": ["tx"]},
+			{"unresolved_transaction_ids": ("",)},
 			{"warnings": ("",)},
 			{"finalized_tip": 8},
 		):

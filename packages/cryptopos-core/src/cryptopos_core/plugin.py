@@ -113,10 +113,25 @@ class RecipientBaseline:
 	tip: Optional[int]
 	transaction_ids: tuple[str, ...] = ()
 	balance_native: Optional[int] = None
+	#: The payment component this sale must be paid THROUGH, or "" for a rail
+	#: that receives at a plain address.
+	#:
+	#: OPTIONAL WITH A DEFAULT, and that is the whole reason it lives here.
+	#: `create_request` takes only an intent -- no configuration -- and D43
+	#: records what happened the day a published plugin protocol gained a
+	#: REQUIRED field: every installed 0.1.0 wheel became undriveable while the
+	#: unit suite stayed green, because the suite tests the source and the
+	#: deployment runs the install. A defaulted field on a structure the host
+	#: constructs is additive; an argument on a protocol method is not. The
+	#: adapter that needs this is the one that captured the baseline, so the
+	#: fact travels with the baseline.
+	payment_component: str = ""
 
 	def __post_init__(self):
 		if not isinstance(self.rail_key, str) or not self.rail_key:
 			raise InvalidRailPlugin("recipient baseline rail key must be non-empty text")
+		if not isinstance(self.payment_component, str):
+			raise InvalidRailPlugin("recipient baseline payment component must be text")
 		if not isinstance(self.recipient, str) or not self.recipient:
 			raise InvalidRailPlugin("recipient baseline recipient must be non-empty text")
 		if not isinstance(self.provider, str) or not self.provider:
@@ -268,6 +283,21 @@ class ObservationBatch:
 	warnings: tuple[str, ...] = ()
 	finalized_tip: Optional[int] = None
 
+	#: Transactions this batch saw and could not establish the status of --
+	#: the provider was asked and did not answer, as opposed to answering that
+	#: they failed.
+	#:
+	#: OPTIONAL WITH A DEFAULT, like `RecipientBaseline.payment_component` and
+	#: for D43's reason: a published protocol may not gain a REQUIRED field,
+	#: and every installed rail wheel constructs this class positionally.
+	#:
+	#: It exists because a rail cannot otherwise tell settlement the
+	#: difference between "the chain says this money did not move" and "I could
+	#: not find out". The first is a decision and belongs in review; the second
+	#: is the absence of one, and a terminal state taken on it is a sale lost
+	#: to a transient read (D10 never reopens).
+	unresolved_transaction_ids: tuple[str, ...] = ()
+
 	def __post_init__(self):
 		if not isinstance(self.rail_key, str) or not self.rail_key:
 			raise InvalidRailPlugin("observation rail key must be non-empty text")
@@ -310,6 +340,10 @@ class ObservationBatch:
 		unattributed = _coerce_integer(self.unattributed_native)
 		if unattributed is None or unattributed < 0:
 			raise InvalidRailPlugin("unattributed observation amount must be non-negative")
+		if not isinstance(self.unresolved_transaction_ids, tuple) or any(
+			not isinstance(value, str) or not value for value in self.unresolved_transaction_ids
+		):
+			raise InvalidRailPlugin("unresolved transaction ids must be a tuple of non-empty text")
 		if not isinstance(self.warnings, tuple) or any(
 			not isinstance(warning, str) or not warning for warning in self.warnings
 		):
@@ -379,6 +413,15 @@ class ObservationBatch:
 			self.unattributed_native + page.unattributed_native,
 			warnings,
 			finalized,
+			# THE LATER PAGE WINS, per transaction, and it is not a union: a
+			# transaction that could not be read on one poll and read cleanly
+			# on the next is resolved, and carrying the old doubt forward would
+			# keep a settled sale pending forever.
+			tuple(
+				value
+				for value in (*self.unresolved_transaction_ids, *page.unresolved_transaction_ids)
+				if value not in {t.transaction_id for t in page.transfers if t.confirmed}
+			),
 		)
 
 

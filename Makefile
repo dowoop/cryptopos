@@ -20,7 +20,7 @@ RUFF     := uvx ruff@$(RUFF_VER)
 MATRIX   := 3.9 3.11 3.13 3.14
 
 .DEFAULT_GOAL := help
-.PHONY: fit lockcheck help dev test terminal reorg prove worth watch lint fmt matrix wheel check build dist-verify clean docker-check
+.PHONY: fit lockcheck help dev test terminal reorg reach prove worth watch lint fmt matrix wheel check build dist-verify clean docker-check
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -54,6 +54,9 @@ terminal: ## Run the terminal suites (render + buttons), no browser needed
 
 reorg: dev ## Check the reorg probe from recorded answers (no bench or network)
 	$(PY) tools/h_reorg_probe.py
+
+reach: dev ## Check the reach probe from recorded answers (no bench or network)
+	$(PY) tools/h_reach_probe.py
 
 prove: dev ## Fail if any function or control is never exercised
 	@# Two halves of one claim. The Python gate reads line coverage from
@@ -134,9 +137,9 @@ dist-verify: build ## Print SHA256 of the built artifacts, for a release record
 	@# from the sdist and compare.
 	@cd $(CORE)/dist && sha256sum *.whl *.tar.gz
 
-check: lint reorg matrix wheel prove terminal worth ## Everything CI would run
+check: lint reorg reach matrix wheel prove terminal worth ## Everything CI would run
 	@echo
-	@echo "lint clean, offline reorg gate green, suite green on $(MATRIX), wheel installs and passes,"
+	@echo "lint clean, offline reorg and reach gates green, suite green on $(MATRIX), wheel installs and passes,"
 	@echo "every line executes, every control responds, and breaking any of"
 	@echo "it on purpose is caught."
 

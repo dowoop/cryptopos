@@ -33,6 +33,7 @@
   "testnet_xpub",
   "next_address_index",
   "testnet_recipient",
+  "payment_component",
   "column_break_endpoints",
   "live_url",
   "real_transport",
@@ -217,6 +218,12 @@
    "fieldname": "testnet_recipient",
    "fieldtype": "Data",
    "label": "Testnet Recipient"
+  },
+  {
+   "description": "Ootle payment component. When set, a payer calls this component's `pay` method naming the sale, and only payments naming THIS sale are credited. Leave empty and the rail falls back to a shared account, where any deposit that covers an open invoice settles whichever sale polls first.",
+   "fieldname": "payment_component",
+   "fieldtype": "Data",
+   "label": "Payment Component"
   }
  ],
  "index_web_pages_for_search": 1,

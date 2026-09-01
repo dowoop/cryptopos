@@ -3122,3 +3122,1239 @@ exactly the kind that gets believed.
 Gates: `make check` green — 100% line coverage, 2201/2212 mutants with the same
 11 documented equivalents as before, 3.9/3.11/3.13/3.14, wheel. See D5, D19,
 D26, D31, D33.
+
+## D47 · A missing probe is not an unreachable rail, and the deployment was awarding points into a component that no longer exists — 2026-08-31
+
+the maintainer asked to focus entirely on testnet Ootle and get it fit to show. Two
+things were in the way, and neither was visible from any green suite.
+
+### `xtr` was UNREACHABLE from all four workers, against an indexer answering in 0.51 s
+
+`tools/reach_probe.py` shipped probes for `bitcoin`, `evm-native`, `evm-erc20`
+and `solana`. It had none for `ootle`, and the unknown-family branch raises
+`ProbeFailure("configuration error", …)`, which `run()` printed under the word
+**UNREACHABLE**. So every worker reported
+
+```
+xtr  UNREACHABLE — configuration error: no reach probe exists for family 'ootle'
+```
+
+while `GET https://ootle-indexer-a.tari.com/network` answered
+`{"network":"esmeralda","network_byte":38,"epoch":10775}` from inside the same
+container in half a second.
+
+**The cost was the whole of D40's third door.** `prove_end_to_end.py` runs
+`reach_probe` in all four containers before spending, so
+`prove_end_to_end.py --rail xtr` refused every run — the one tool that proves a
+rail works could not prove the rail the maintainer wants to ship — and it closed with
+*"Restore the configured endpoint's container reachability first"*, which is
+advice for a fault that did not exist.
+
+This is the **fifth** entry with the shape D25, D38, D39 and D40 share: a true
+condition wearing a false sentence. The condition ("no probe exists") was
+correct and the headline ("UNREACHABLE") was not, and the sentence is the half
+an operator acts on.
+
+Fixed three ways, because the fix for one family would not stop the sixth:
+
+* `_ootle` makes the same `/network` read `OotleEsmeralda.readiness` itself
+  makes, and takes the expected network from the **rail row's catalog key**
+  rather than a hardcoded `"esmeralda"` — an endpoint repointed at another
+  Ootle network is now a finding, which is the hazard `chain.py` warns about
+  in its own words.
+* `_classify` splits the headline: a configuration error reads **NOT PROBED**
+  and says so — *"a gap in this tool, not a fault at the endpoint"* — and
+  `prove_end_to_end.py` refuses with the matching advice. Both still refuse.
+  A rail nothing can confirm is a rail nothing may charge on, so no exit code
+  softened.
+* **`reach_probe` was in no gate at all** — no Makefile target, no harness, no
+  test — which is how the gap survived. `tools/h_reach_probe.py` (`make reach`,
+  now inside `make check`) drives it from recorded answers with Frappe imports
+  and every socket call forbidden. 25 checks. Its coverage check derives the
+  required families from **adapter capabilities and `install.py`'s own
+  ADAPTERS table, read with `ast`** — never from `_PROBES`, because a check
+  that asked the probe table what the probe table should contain would have
+  passed on the day `ootle` was missing.
+
+Six `H_REACH_MUTATION` modes, every one seen red and none crashing:
+`ootle_missing`, `unprobed_is_green`, `unprobed_says_unreachable`,
+`ootle_any_network`, `ootle_any_epoch`, `ootle_hardcoded_network`. Live control
+too: pointing `xtr` at `polygon-amoy-bor-rpc.publicnode.com` — a host that
+answers — refuses with HTTP 404 while the real indexer passes, so reachability
+drives the guard rather than mere configuration.
+
+All four workers now exit 0 on all seven rails. `sol` is reachable in every
+container as well, so **D39's DNS failure has cleared** — measured, not assumed.
+
+### The deployment's loyalty component had been deleted from under it
+
+D46 republished the loyalty template on 2026-08-31 because
+`tari_template_lib 0.29` serialised an `Amount` as an array where the engine
+now wants a `u128`, and a new WASM means a new template address. The new
+addresses went into `ootle-testnet/ADDRESSES.md`. **`CryptoPoS Settings` was
+never repointed.**
+
+Asked of the chain rather than reasoned about:
+
+| | `promise()` |
+|---|---|
+| `component_73f1d0bf…` — what the deployment was configured with | **404, does not exist** |
+| `component_11d2dd28…` — what `ADDRESSES.md` documents | live, `committed_this_epoch: 2500` |
+
+That 2,500 is D46's own award, sitting in the component the app was not
+pointing at. `api.loyalty_status` returned `facts: null` and
+*"the indexer answered 404 for substates/component_73f1d0bf…"* — so **loyalty
+through ERPNext was dead**, degrading honestly and therefore quietly. Repointed
+to the live pair; it now reads facts, six ceilings and a balance of 2,500.
+Constructor parameters are unchanged and were checked on-chain, not assumed:
+rate 100, ceilings 1,000,000 and 10,000,000.
+
+**The old values are recorded here so the change is reversible:**
+`component_73f1d0bff706282ebee60d51769a0c259a6bd8e7d58eb2fa3aa381fe14d70ae2`
+and `resource_73c428292c39cdda71db621dc22c3899b4c7a3e11aecdb6058937e7d4f22fd48`.
+
+### What is still open, and was found on the way
+
+* **`harnesses/live_loyalty.py` still pins contract 1** — the dead one. That is
+  what `h_docs.py` §13 was failing on when this session arrived (102/103,
+  reproduced against a clean tree with the working-tree change stashed, so it
+  is inherited and not caused here). The document was right and the pins were
+  stale, which is the opposite of what the check's sentence suggests. Contract
+  2's full set, read off the chain: template `985d07cc…`, component
+  `11d2dd28…`, points `11ee7e60…`, entitlements `110dd385…`, enrolments
+  `11642b84…`, vault claims `117d628f…`.
+* **Three of the six addresses §13 flags are not contracts at all** — an XTR
+  resource constant, a customer account, and a line the file itself says not to
+  use. The check assumes every 64-hex address in a living document is a
+  deployed contract some live probe should pin. Widening it is a judgement
+  about what counts as pinnable, so it is left stated rather than taken.
+* **The indexer is intermittent.** `points_balance` measured six times: 0.69 s,
+  0.74 s, 0.92 s, 0.95 s, 6.82 s, and one that passed 15 s and timed out. The
+  4.0 s default in `chain.READ_TIMEOUT_SECONDS` is not the problem and raising
+  it would not fix this. Re-run before believing a single failure, exactly as
+  §3 already says for Sepolia.
+* **There is no bundled payer for `xtr`.** `prove_end_to_end.py --rail xtr` now
+  clears the reach gate and stops at `customer_wallet.can_pay`, which lists six
+  rails and not this one. The verb exists — `toolkit devbench pay <account>
+  <microTari>`, *"the one direction no other verb sends"* — but the dev-bench
+  key is sealed and needs `OOTLE_KEY_PASSPHRASE`, which is the maintainer's and which the
+  toolkit's own help says is readable by any process running as the user. So an
+  automated end-to-end Ootle proof is one decision away, not one build away.
+
+Gates: `make reach` 25/25 and `make lint` clean. `make check` was **not** run —
+it invokes `worth`, which rewrites `src/` in place while six containers import
+that tree by absolute path, and the stack was serving throughout. See D5, D25,
+D31, D38, D39, D40, D46.
+
+## D48 · "exact-amount match" was false on all five shared-binding rails, in the library, the till and three published READMEs — 2026-08-31
+
+the maintainer narrowed the goal: **Ootle is the only rail that will be offered publicly.**
+That turned `xtr`'s binding from one weakness among seven into the whole
+product's attribution story, so it was attacked directly — and the attack landed
+somewhere nobody had looked.
+
+### What every surface said, and what the code does
+
+`rails.RAILS` described `eth`, `usdc-eth`, `pol`, `usdc-pol` and `xtr` as
+*"static address + **exact-amount match** in the lock window"*. The published
+`cryptopos-rail-evm` README said the rails *"match a payment by amount inside
+the lock window"* and that nothing *"can tell two sales of the same amount
+apart"*. `cryptopos-rail-ootle`'s README said *"a payment is matched by amount
+within the lock window"*. `cryptopos-core`'s rail table said *"shared-account
+exact-amount binding"*.
+
+There is no amount match anywhere. `settle()` sums the **running total** of
+unclaimed, timely transfers and settles the moment that total reaches the
+invoice. Reproduced against the real adapters, offline:
+
+| rail | invoice | one deposit arrives | result |
+|---|---|---|---|
+| `xtr` | 5,000,000 µT | 5,000,000 µT | settles |
+| `xtr` | 100,000 µT | 5,000,000 µT | **settles, credited 5,000,000** |
+| `xtr` | 1 µT | 5,000,000 µT | **settles, credited 5,000,000** |
+| `eth` | 1 wei | 10¹⁵ wei | **settles, credited 10¹⁵** |
+| `xtr` | 5,000,000 µT | 3,000,000 + 2,000,000 | settles (**summed**) |
+
+So the true rule is *"the first open sale whose invoice the unclaimed timely
+total covers"*. The whole two-sale sequence needs no matching amounts and no
+attacker: sale A invoiced 100,000 µT and sale B invoiced 5,000,000 µT, B's
+customer pays, **A polls first and settles on B's money**, and B — whose
+customer actually paid — ends `needs-review` credited nothing. `watch.py`'s
+`_claimed_transaction_ids` had already conceded the shape in its own words:
+*"This is a defense, not a proof of exclusivity."* What was wrong was every
+sentence describing it.
+
+**This kills the obvious remedy before it was built.** Giving each sale a unique
+amount is the standard trick for a shared address, and it does nothing here,
+because the gate is a running total and not an equality. Any fix has to change
+what `settle` compares, not what `charge` invoices.
+
+### Why it survived
+
+The claim was **frozen prose in a data table**, and prose in a table is not
+executable. 650 core tests, 444 in the published tree, 100% line coverage and
+full mutation coverage all pass with the sentence saying the opposite of the
+code, because nothing asserts that a description matches a behaviour. It is the
+`maturity: "works"` problem — legacy metadata nobody re-derived — wearing a more
+dangerous sentence, and it is the fourth time this project has found a **true
+condition attached to a false sentence** (D25, D38, D39, D40, and the `ootle`
+reach probe earlier today).
+
+The understatement mattered in the harmful direction. A reader of the EVM box
+concluded they were safe unless two sales shared an amount, and priced their
+risk accordingly.
+
+### Corrected
+
+`rails.py` in both trees now says *"running-total match … any covering deposit
+settles it, whatever it was sent for"*. `xtr`'s `gate_text` — shown to a
+customer at the till — said *"the recipient vault's revealed_amount rose by the
+invoiced amount"*, which is both the wrong quantity and a leftover from the
+pre-D46 balance-delta design; it now names unclaimed deposits totalling **at
+least** the invoice. All three published READMEs carry the corrected sequence,
+and `cryptopos-rail-ootle` gained a boxed warning at the top of the file
+matching the EVM package's placement, because Ootle is now the only rail being
+shipped and its disclosure was the weakest and most buried of the three.
+
+650 core tests and 444 published-tree tests green after the change; `ruff` clean.
+**The built wheels in `published/*/dist/` are now stale against these sources
+and must be rebuilt before any republish.**
+
+### Open, and deliberately not decided here
+
+Whether to *fix* the binding rather than only describe it. The cheap lever
+(unique amounts) is dead. What remains is either a per-sale account — Ootle's
+`toolkit open-account` makes this cheaper than the EVM case D9 rejected, because
+the merchant pays and fees are ~3,493 µT — or a payment component taking a sale
+reference as an argument, which the ootle README already names as the real
+answer and which is a smart contract rather than an adapter change. A
+counter-argument on this is running. **the maintainer's call.** See D5, D9, D21, D25, D45,
+D46, D47.
+
+## D49 · The per-sale binding Ootle needs already works, and it was proved on a contract that is already deployed — 2026-08-31
+
+D48 left one thing open: how to *fix* `xtr`'s binding rather than only describe
+it. Two counter-arguments had killed both cheap remedies and converged on the
+same answer — a payment component taking a sale reference — which the
+`cryptopos-rail-ootle` README had already named as "a smart contract, not an
+adapter change". The open risk was that nobody had checked whether such a
+payment is **observable**. A component that binds perfectly and cannot be read
+is worth nothing.
+
+It is observable, and the proof needed no new code.
+
+**Custom template events are indexed, namespaced by the template module.** The
+deployed loyalty contract emits `emit_event("PointsIssued", metadata![...])`.
+Filtering the event stream on topic `PointsIssued` returns **nothing**, which
+looks exactly like "custom events are not indexed" and is why this was worth
+measuring rather than assuming. The real topic is **`Loyalty.PointsIssued`** —
+the module name is prepended. Unfiltered, the component's stream also carries
+`std.component.created`.
+
+Read from esmeralda today:
+
+```
+GET /transactions/events/stream?substate_id=<component>&topic=Loyalty.PointsIssued&after_id=0
+
+event: Loyalty.PointsIssued
+data: {"transaction_id":"708842dd…","event":{"substate_id":"component_11d2dd28…",
+       "template_address":"985d07cc…",
+       "payload":{"epoch":"10766","points":"2500","sale_ref":"CPS-2026-00438"}}}
+```
+
+**The payload carries the sale reference verbatim.** So a `Payments` component
+emitting `PaymentReceived` with `sale_ref` and `amount` is readable as
+`Payments.PaymentReceived` on the same per-substate, cursor-replayable stream
+the adapter already uses for `std.vault.deposit` — the primitive D46 called the
+best observation model of any rail here. That is an **unconditional per-sale
+binding**: the money names the sale it is for, and no running total, amount
+heuristic or payer assertion is involved.
+
+What this closes, before any Rust is written:
+
+* the remedy is not speculative — the mechanism is running in production on a
+  contract deployed on 2026-08-31;
+* observation needs no new transport, no extra request, and no change to how
+  the adapter resumes from a cursor;
+* the failure D48 reproduced (A settles on B's money) cannot occur, because
+  attribution stops being an inference.
+
+**Not yet built.** The component itself is unwritten — a Codex order for it hit
+the account's usage limit 99 seconds in, and the toolchain is available here
+(`cargo 1.97`, `wasm32-unknown-unknown`, and `ootle/loyalty` has built before).
+Whoever writes it: name the module so the topic reads sensibly, because the
+topic is the module name and it is part of the wire contract. See D5, D46, D48.
+
+## D50 · The payment component exists, and D48's failure is gone in a test that reproduces it — 2026-08-31
+
+D49 proved the mechanism was available. This is the component and the adapter
+half, both written here after a Codex order for the same work hit the account's
+usage limit 99 seconds in.
+
+### The component
+
+`Point of Sale/ootle/payments/` — a `#[template]` crate modelled on the deployed
+`ootle/loyalty`, using its dependency versions rather than chosen ones for the
+reason that file records: a promise about what an engine refuses is a claim
+about a specific engine build. **159 KB of WASM against loyalty's 327 KB**, which
+matters because a publish fee is quadratic in size and loyalty published fine.
+
+`pay(payment: Bucket, sale_ref: String)` takes the reference as an ARGUMENT and
+emits it. Nothing is inferred from amount, time, payer or polling order. Four
+refusals, each with a test that sees it fire: an empty reference, one over 128
+bytes, a bucket of the wrong resource, and an amount of zero. Withdrawal is
+checked in the body against the operating key rather than named in an engine
+rule, for the reason the loyalty template records — a component gate can only
+name a FIXED rule, and a key that can never be replaced cannot survive a theft.
+
+Two judgements worth arguing with later:
+
+* **Duplicate references are recorded, not refused.** A customer who pays twice
+  has made two payments; refusing the second strands real money in a contract
+  with no refund path. The host's claimed-transaction set already stops one
+  invoice being credited twice, and what changed is that attribution is no
+  longer an inference.
+* **The struct name is part of the wire contract.** The topic is
+  `Payments.PaymentReceived`, so renaming `Payments` silently changes what every
+  watcher filters on — and a watcher filtering a topic nothing emits sees no
+  payments rather than an error. That is D49's trap pointed at ourselves.
+
+10 engine tests, all passing.
+
+### The adapter
+
+`ootle.py` gained a component path, guarded so a rail with no
+`payment_component` configured behaves exactly as before. Observation reads the
+component's own event stream and keeps only payments whose `sale_ref` matches
+the intent; a malformed event is a REFUSAL rather than a skip, because an event
+this build cannot read might be a payment for this sale and dropping it silently
+would under-credit someone who really paid.
+
+**`create_request` takes no configuration, and D43 forbade adding a required
+field to a published protocol.** So the component travels on
+`RecipientBaseline.payment_component`, an OPTIONAL field with a default — the
+adapter that captured the baseline is the one that knew the component. The
+request's notice also changes: a plain transfer to the component address names
+no sale and would never be credited, so saying "send to this address" there
+would take real money and never credit it.
+
+### The proof
+
+D48's exact scenario, now a test rather than a script:
+
+| | shared account (D48) | payment component |
+|---|---|---|
+| SALE-A, invoiced 100,000 µT, **paid nothing** | **settled, credited 5,000,000** | `pending`, credited 0 |
+| SALE-B, invoiced 5,000,000 µT, **customer paid** | `needs-review`, credited 0 | **settled, credited 5,000,000** |
+
+Green: 658 core tests (was 650), `make lint`, `make reach` 37/37, the Point of
+Sale sweep at 1,762 checks and 0 failing, and 10 engine tests in the new crate.
+
+### Not yet live, and why
+
+The WASM is **not published**. `toolkit publish` signs a transaction and spends
+merchant XTR, and the sandbox refused it — correctly; it is exactly the class of
+action that should not happen without being asked for. Until it is published and
+a `Crypto Rail` row names the resulting component, `xtr` still runs the shared
+path and **must not be offered to strangers**. Nothing in this entry changes
+that; it is what makes changing it possible. See D5, D43, D48, D49.
+
+## D51 · Attacking my own payment component found a hand-rolled authorisation and a caveat no code closes — 2026-08-31
+
+Codex was rate-limited, so the adversarial pass D50 asked for was done here
+instead. Two findings, one fixed and one that is not a code problem.
+
+### Fixed: `withdraw` hand-rolled authorisation the engine already provides
+
+It read:
+
+```rust
+assert!(CallerContext::transaction_signer_public_key() == self.operating_key, ...)
+```
+
+`ootle/loyalty` uses `CallerContext::get_signer_proof_for_public_key(key).drop()`
+for the same job, and its constructor comment calls capturing the signer *"the
+defect rather than a detail of it"*. The two are not the same check:
+`transaction_signer_public_key` is the key that **SEALED** the transaction, so
+comparing against it demands the merchant be the sealer rather than merely a
+signer — a merchant co-signing a transaction somebody else sealed would be
+refused their own money. It is also hand-rolled authorisation where the engine
+has a primitive. Now uses the primitive; 10/10 engine tests still pass.
+
+Worth noting that the test suite did **not** catch this. `only_the_operating_
+key_can_withdraw` passes under both versions, because a thief is refused either
+way. The defect was in who else gets refused, and no test asked.
+
+### Not fixed, because it is not a code problem: nobody has a wallet that can pay it
+
+`pay` is a **component method call with a string argument**, not a transfer. A
+customer's transaction must withdraw into a bucket and call the method. That is
+the compose / sign / seal handoff this repository already built for loyalty
+enrol and redeem — and `ootle/pocket`'s own docstring is blunt about what that
+does not establish: *"A wallet written in this repository and run on this
+workstation is the merchant's wallet no matter whose directory its key sits in.
+Those rows ask whether a wallet somebody else controls signs, and the answer is
+still no."*
+
+So the binding is correct and a stranger still cannot use it, because the
+product that would let them does not exist. That is board item R2, open and
+external, arriving from a new direction. It does **not** make the component
+pointless: it makes the library correct for anyone who adopts it, and it makes
+the operator-only demo honest. It does mean a public anonymous till is further
+away than "publish the WASM".
+
+### Built so the rest is one command
+
+`toolkit devbench pay-sale <component> <microTari> <sale-ref>` composes exactly
+the transaction the component needs — `want_vault_for` on the payer's own vault
+(the giftcard redeem path records learning that the expensive way), withdraw to
+a workspace bucket, then `call_method(component, "pay", [bucket, sale_ref])`.
+It compiles and refuses at the sealed-key gate before touching the network.
+
+Green after all of it: 658 core tests, `make reach` 37/37, `make lint`, the
+Point of Sale sweep at 1,762 checks and 0 failing, 10 engine tests.
+
+**Three things this session cannot do**, listed so they are not rediscovered:
+publishing the WASM (the sandbox refuses a signing, fund-spending command, and
+correctly); `OOTLE_KEY_PASSPHRASE` for the sealed dev-bench key; and the
+`delete_repo` scope for the force-pushed GitHub objects. See D43, D48, D49, D50.
+
+## D52 · The per-sale binding is live on esmeralda, and D48's failure is gone against the real chain — 2026-08-31
+
+the maintainer authorised publishing. The component is deployed, paid twice with real
+XTR, and the real adapter attributes each payment to exactly the sale that
+named it.
+
+```
+template   template_3547fb37e3fb6e5a7a284402c9acd0280bfd500c38c0d6bcf65f876956a4e65c
+           tx ba1b5be63496ea0dc0c70d4754dbef8fc3da7e1055da0a90451a74d6e76f37e7
+           159,477 bytes, fee 787,893 uT of a 7,504,477 budget
+component  component_d7d8bb5a92c097e359e8d6e914e5b7cc9cff31072d1259daac114228d127e12f
+           tx e88a70013b114d203f186d5151f6247f671d591d256134736fc371ff508fa78e
+           XTR vault_d7693a565f407d5aa35bb122e117932085777dbf389736faf44265dc78b2547b
+           fee 1,838 uT
+```
+
+Two real payments, then the adapter asked what they settled:
+
+| sale | invoiced | outcome | credited | transaction |
+|---|---|---|---|---|
+| `DEMO-SALE-A` | 100,000 µT | settled | **100,000** | `f74985c4e419…` |
+| `DEMO-SALE-B` | 5,000,000 µT | settled | **5,000,000** | `0afae1d88149…` |
+| `DEMO-SALE-Z` | 1,000 µT, nobody paid | pending | 0 | — |
+
+`DEMO-SALE-Z` is the control and it is the whole point. Under the shared-account
+rule its 1,000 µT invoice is covered a hundred times over by either payment
+sitting in that vault, and D48 measured that the first sale to poll takes them.
+Here it is credited nothing, because neither payment names it. `DEMO-SALE-A`
+likewise did not take `DEMO-SALE-B`'s 5,000,000 despite polling first — the
+exact pair that failed in D48.
+
+**This is real-chain evidence, not a fixture.** The rule this project has
+learned four times over is that a green suite is not evidence a rail works; the
+transaction ids above are.
+
+### Two toolkit verbs, and what each does and does not prove
+
+`toolkit payments deploy <template>` instantiates it, naming the operating key
+rather than capturing the signer — `loyalty`'s constructor records why capturing
+it was "the defect rather than a detail of it".
+
+`toolkit payments pay <component> <microTari> <sale-ref>` is what made the
+evidence above, and it is signed by **this machine's own merchant key**. Said
+plainly rather than glossed: it proves the component binds a real deposit to a
+named sale on the real network, and it proves nothing whatever about a stranger
+paying. `toolkit devbench pay-sale` is the same transaction signed by somebody
+who is not the merchant, and it needs `OOTLE_KEY_PASSPHRASE`, which this session
+does not have.
+
+Both compose the same shape: `want_vault_for` on the payer's own vault, withdraw
+to a workspace bucket, then `call_method(component, "pay", [bucket, sale_ref])`.
+The `want_vault_for` is not optional — `call_method` auto-adds vaults for the
+component being CALLED, and the withdraw goes through `.then()` on the raw
+builder, which adds no wants at all. The giftcard redeem path records learning
+that the expensive way.
+
+### Still true, and not fixed by any of this
+
+The rail row in the deployment does not name the component yet, so the till
+still runs the shared path. And D51's caveat stands: `pay` is a component method
+call, so paying it needs a composed transaction the customer signs, and no
+wallet a real stranger already holds does that. The binding is correct; the
+product that lets a stranger use it is board item R2, open and external.
+
+See D5, D48, D49, D50, D51.
+
+## D53 · A sale charged, paid and booked through the per-sale binding — and the surface that would have prevented a stranded payment — 2026-08-31
+
+`CPS-2026-00450`, 25¢, charged on `xtr` with the rail row naming the payment
+component, paid through the component, settled and **booked as
+`ACC-SINV-2026-00103`**. Credited 5,000,000 µT of 5,000,000, transaction
+`ec653b7ad42ff2f4556edf75265fcf4c86a4f05be0780761d4b7e688010c06ac`.
+
+That is the first sale in this project whose payment was bound to it by the
+money itself rather than by inference.
+
+### The wiring
+
+`Crypto Rail` gained a `payment_component` field; `catalog.configuration_for`
+passes it to the adapter; `charge` snapshots it into `identity_extras` beside
+the endpoint — for the same reason the endpoint is snapshotted, so repointing
+the row mid-flight cannot re-attribute money already in flight — and `watch`
+reads it from the sale rather than re-reading the row.
+
+### The mistake that found a real defect
+
+The first payment attempt named `CPS-2026-00450`, the SALE name. The adapter
+wants `payment_reference`, which `charge` sets to the **invoice ref**
+(`4KQY-VVK3-K7X4`). So 5,000,000 µT went to the right component, for the right
+amount, naming the wrong string — and was **correctly refused and stranded**.
+
+The binding worked exactly as designed. What failed was the surface: `charge`
+has been writing `payer_notice` into `identity_extras` all along and **no API
+ever returned it**. On the shared path that was survivable, because the notice
+only repeated an address the caller already had. On a payment-component rail it
+is the whole instruction, and its absence is what stranded real money.
+
+`status()` now returns `payer_notice`, and a fresh sale reads:
+
+> Pay by calling this component's `pay` method with the sale reference
+> `'VMVW-GA2M-WF49'`; a plain transfer to this address names no sale and will
+> not be credited. Send exactly 5000000 microTari.
+
+**The strongest evidence in this entry is the failure, not the success.** A
+payment of the exact invoiced amount, into the exact component, was refused
+because it named the wrong sale. Under D48's shared account it would have
+settled something.
+
+### A regression I introduced and caught in the same pass
+
+Inserting the `_extras` helper put it between `@frappe.whitelist()` and
+`status`, so the decorator landed on the private helper and `status` lost it —
+exposing an internal as an endpoint and unpublishing a real one. `api_surface`
+confirms `_extras` is not in the endpoint list and `status` is whitelisted
+again. **Run `tools/api_surface.py` after touching `api.py`**; a decorator is
+positional and a helper inserted above a function silently steals it.
+
+Green: 658 core tests, `make reach` 37/37 and exit 0 in all four workers,
+`make lint`, the Point of Sale sweep at 1,762 checks and 0 failing.
+`api_surface` still FAILs on D37's three unscoped surfaces, which the
+operator-only hosting decision answers rather than repairs.
+
+Still open: the till's `binding` still reads `shared` for a
+component-configured rail, because `binding_category` is declared per adapter
+and not per configuration (D45). It understates what is now true. See D45, D48,
+D49, D50, D51, D52.
+
+## D54 · The binding label was understating the guarantee, and the rule lived in two places — 2026-08-31
+
+D53 left the till reporting `binding: shared` for a rail bound by a payment
+component. The money named the sale; the screen said it did not. That is the
+same defect class as D48 pointed the other way — a true condition wearing a
+false sentence — and the quieter direction, because understating a guarantee
+makes nobody suspicious.
+
+**The rule existed twice.** `charge.py` computed it for the sale record and
+`api.rails()` computed it for the till's rail list, and the two versions
+already disagreed: `charge` knew only about xpubs, `api.rails` knew about xpubs
+and the declared category. Neither knew about a payment component. This project
+has an entry (D35) about a rule in three places drifting in the one nobody
+searched for, so the fix was one implementation, not two edits:
+`catalog.binding_label(rail, mode)`, called from both.
+
+**Configuration decides it, and the adapter's declaration is not overridden.**
+D45 established that `binding_category` is a claim about an ADAPTER. Whether a
+DEPLOYMENT binds per sale additionally depends on how it is configured: the same
+Ootle adapter is `shared` pointed at a plain account and per-sale pointed at a
+payment component, and no static declaration can know which. So the label is
+computed from configuration in the app, and the library's declaration is read
+rather than rewritten.
+
+What the till reports now, and every value is the truth about that rail:
+
+```
+btc       per-sale     fresh address per sale from the merchant xpub (D7)
+eth       shared       D5, and the EVM README boxes why
+usdc-eth  shared
+pol       shared
+usdc-pol  shared
+sol       per-sale     Solana Pay reference, per D31 as corrected by D33
+xtr       per-sale     the payment component: the money names the sale
+```
+
+`CPS-2026-00452` charged and reads `binding: per-sale` with the payer notice
+naming `V33Q-ZCX4-VV3G`.
+
+### A regression on the way, caught by looking
+
+The first version returned "" for every rail, because `api.rails()` computed
+`mode` only when `with_readiness` was asked for and I passed `None` into a
+function that needs it. A whole column of the till went blank because a
+variable was computed conditionally for a different caller's benefit. `mode` is
+now read unconditionally.
+
+Green: 658 core tests, `make lint`, `make reach` 37/37 and exit 0 in all four
+workers, `rails_agree.sh` OK, the Point of Sale sweep at 1,762 checks and 0
+failing. `api_surface` still FAILs on D37's three unscoped surfaces, which the
+operator-only hosting decision answers rather than repairs.
+
+See D5, D7, D31, D33, D35, D45, D48, D53.
+
+## D55 · A stranger paid a sale with their own key, and the reason nobody could before was one crate version — 2026-08-31
+
+`CPS-2026-00453`, 25¢ on `xtr`, `binding: per-sale`, paid by a wallet holding a
+key this till has never seen, settled and **booked as `ACC-SINV-2026-00104`**.
+Transaction `1d28f26ee9611404118670ffc31b29449d5f0cb4916d9cd2db35f02f97056a68`.
+
+D51 concluded that no wallet a stranger holds could pay a payment component and
+called it board item R2, open and external. That was wrong in the useful
+direction: the capability was already in this repository and had been broken
+since the day before.
+
+### The path, and who held what
+
+1. `pocket address` created a fresh wallet with its own key in its own
+   directory. The till never sees it.
+2. `toolkit open-account <address> 6000000` — the merchant paid to bring that
+   account into existence, because an Ootle account does not exist until
+   somebody creates it.
+3. `api.charge(25, "xtr")` → `CPS-2026-00453`, invoice ref `RWJT-XAE4-V3H7`.
+4. `toolkit payments pay <component> 5000000 RWJT-XAE4-V3H7 --member <pubkey>
+   --account <component> --compose stranger.json` — composed against the
+   CUSTOMER's account and written out unsigned, holding no customer key.
+5. `pocket read stranger.json` — and this is the part that makes it consent
+   rather than compliance. It decodes the instructions **from the bytes**:
+   withdraw 5,000,000 XTR from *your* account, then call `pay` on the component
+   with argument `"RWJT-XAE4-V3H7"`. It also showed that the FEE is paid by the
+   merchant's account, which nothing had established before.
+6. `pocket sign` → `toolkit submit-request`. Settled, booked.
+
+### What was actually broken, and for how long
+
+`submit-request` first refused with *"produced by \<the right key\>, but not
+over these bytes sealed by \<the merchant\>"*. The cause was not the signature:
+
+```
+toolkit  ootle-rs 0.21   tari_ootle_transaction 0.39
+pocket   ootle-rs 0.16   tari_ootle_transaction 0.37
+```
+
+The toolkit was moved to 0.21 on **2026-08-30** with the note *"esmeralda runs
+indexer 0.39.3 and REFUSED a 0.16-built transaction -- the wire format moved;
+these follow it."* `pocket` was not moved with it. The two then serialised
+`UnsignedTransaction` differently, so the customer signed one set of bytes and
+the till verified another. **A signer one version behind the sealer is a signer
+whose consent cannot be used.**
+
+This is D46's finding repeating inside our own tree: everything in the Ootle
+stack was one version behind a network that had moved, and the fix moved five
+things and missed the sixth. Bumping `pocket` needed two source changes as well:
+`Instruction::EmitLog` is gone from the 0.39 enum, and `max_epoch` stopped being
+optional.
+
+**Nothing said so.** The toolkit's three signing-request tests have been failing
+since that bump — reproduced on a clean tree with today's work stashed, so
+inherited — because their fixtures were composed under the old format and no
+longer decode. And `harnesses/run_all.py` does not run `cargo test`, so a green
+sweep sat on top of a dead signing path. The compose/sign/submit handoff had no
+live exercise anywhere.
+
+### What is now true, and what is still not
+
+A stranger CAN pay a bound sale, with their own key, seeing what they sign. What
+remains is **distribution, not capability**: `pocket` is a binary from this
+repository that a customer must obtain and run. That is a smaller and more
+ordinary problem than "the product does not exist", and it is the honest
+statement of where R2 now sits.
+
+Still open: the toolkit's three fixture tests, which need regenerating under the
+current wire format, and which no gate runs. See D46, D48, D50, D51, D52, D53.
+
+## D56 · The sweep now runs cargo, and it failed on its first run — 2026-08-31
+
+D55 found the customer-consent path had been dead for a day and that nothing
+reported it, because `harnesses/run_all.py` counted 1,762 Python checks and
+printed `clean` while never once running `cargo test`. Both halves are closed.
+
+### The fixtures, regenerated and now regenerable
+
+The toolkit's three signing-request tests and four of `pocket`'s ten were
+failing on fixtures composed under `ootle-rs` 0.16, which stopped decoding when
+each crate followed esmeralda to 0.21/0.39. They were regenerated from live
+artefacts made today — a real composed request, a real signature from a key the
+till has never held, and the Python wire payload re-encoded through
+`qr_wire.from_file`.
+
+**Each fixture file now carries the command that remakes it.** The old set had
+no such note, which is why a wire-format bump silently killed it rather than
+prompting anyone to regenerate. A fixture nobody can remake is a fixture that
+dies at the next bump.
+
+Two assertions moved with the fixtures, and the move is an improvement rather
+than a concession: they asked whether a signer is shown *their vault* on a
+loyalty enrol, and now ask whether a signer is shown *their account, the amount,
+and the sale reference* on a payment. The added one matters most — a renderer
+that showed the money and hid which sale it settles would let a customer
+authorise the right amount against the wrong invoice.
+
+Toolkit 4/4, pocket 10/10, payments 10/10, loyalty green.
+
+### The gate
+
+`run_all.py` now runs `cargo test --release` for every crate under `ootle/` that
+has a `Cargo.toml`, and **a missing toolchain is reported rather than skipped**:
+it prints `UNVERIFIED - cargo is not on PATH, so these did NOT run` and fails.
+"The checks did not run" and "the checks passed" must never look the same --
+the rule `audit-secrets.sh` learned when it printed `ok` for a refusal it had
+not observed.
+
+**It caught something on its first run.** `pocket` reported 4 failures the
+moment the gate existed, in a crate that had looked fine all day because
+nothing had ever asked it.
+
+The cost is honest: the sweep went from **6.2 s to about 190 s**, almost all of
+it the loyalty crate's engine tests. That is the price of the Python half no
+longer being able to report `clean` over a dead Rust half, and it is worth
+paying. If it becomes a problem the answer is a faster loyalty suite, not a
+quieter gate.
+
+See D46, D51, D55.
+
+## D57 · Two reviews, two refusals, one real settlement bug, and a scan of mine that was wrong — 2026-08-31
+
+the maintainer authorised building a public surface **if the review cleared it**. It did
+not clear it. It is not built.
+
+### The public surface: refused, and the refusal is right
+
+Proposed: one read-only, unauthenticated endpoint returning a single sale's
+payment request, keyed by its invoice reference. I checked the entropy myself
+first — `secrets.choice` over 27 characters, 12 long, **57.1 bits**, 1.5×10¹⁷
+possibilities, not enumerable — and that turned out to be answering the wrong
+question.
+
+> "The endpoint may be database-read-only, but its output is not passive: it
+> publishes the exact bearer data needed to select a live sale for an
+> irreversible on-chain write."
+
+That write drives `awaiting → confirmed` and creates a real Sales Invoice. The
+reference is not a lookup key, it is a **capability**: whoever holds it can
+cause ERPNext to book that sale. Serving it to anyone who asks hands out that
+capability, and unguessability is irrelevant when you are publishing the guess.
+
+What survived, and would be the shape to build:
+
+* a **separate service** holding no database credentials, serving a published
+  artifact written by a writer that runs after `charge()` and after every state
+  transition, replaced atomically;
+* keyed by a **new 128-bit token**, never `invoice_ref` — reusing it lets the
+  public event stream enumerate ERP lookups, because the chain's copy of the
+  reference is public;
+* Cloudflare serving and rate-limiting it, with ETags so settlement-watching
+  never touches Frappe.
+
+And a limit no ERP change reaches: **one publicly identified component emits
+every payment**, so shop-wide takings stay correlatable from the public stream.
+Concealing that needs per-sale components or a different event commitment — a
+chain-level change, not another endpoint.
+
+### The blob scan I got wrong, twice
+
+I reported "zero occurrences in any blob" for all four published repositories,
+in two separate messages. It was false. `git grep … $(git rev-list --all)`
+searches only **reachable** objects, and the pre-squash blobs were unreachable
+but still in the object database — the review named three by SHA and all three
+read back with `git cat-file -p`:
+
+```
+cryptopos-rail-bitcoin  ee5cd699454a2ec0e6e5ffa30f9993e4021665e5
+cryptopos-rail-evm      81e6db5bba4970d467f9e9c3ecc83be185d7deb3
+cryptopos-rail-ootle    1323ffea7b973f73abb81070133c650885aa4cd4
+```
+
+The method that actually answers the question is `git cat-file
+--batch-all-objects`. After `reflog expire --expire=now --all` and `gc
+--prune=now`, all four repositories read 0 by that method.
+
+**This makes the standing GitHub residual concrete rather than theoretical.**
+Those objects were force-pushed; GitHub keeps unreachable objects fetchable by
+SHA until its own collection. Deleting and recreating the repositories is the
+certain fix, and it needs a `delete_repo` scope this token does not carry.
+
+### The settlement bug, reproduced and fixed
+
+`settle()` tested `block_time <= expires_at` and nothing else, so a deposit
+dated a **day before the sale existed** settled it. Reproduced. The cursor is
+what should make that unreachable, but `chain._get_sse` deliberately treats a
+timeout with frames in hand as the end of a replay — a real fix for a real
+problem — and therefore cannot distinguish a finished replay from a truncated
+one. A short baseline over a long history puts pre-existing money after the
+cursor.
+
+Now bounded at both ends, with `_CLOCK_SKEW_SECONDS = 3600` rather than zero,
+because a tight wall-clock lower bound is **D19 wearing the opposite sign**: that
+was a nine-hour timezone error which made every real payment look late and was
+invisible to a fully green suite. Half an hour of skew still settles; a day-old
+deposit goes to `needs-review` rather than being silently dropped, so an
+operator sees it. Three tests pin all three cases. Ported to the published rail
+package: core 661 tests, published core and rail suites green.
+
+### One claim that did not reproduce
+
+The review said `/transactions/{id}` holds only transactions submitted through
+that same indexer, so a stranger paying via another wallet would 404 and be
+routed to review. **Not reproduced.** `ootle-indexer-b.tari.com` exists and
+returns HTTP 200 on both `/transactions/{id}` and `/transactions/{id}/result`
+for a transaction submitted through indexer A. The documented caution stands;
+the failure mode does not occur on esmeralda today.
+
+### The publication verdict
+
+The second review says do not publish, and lists blockers beyond the two fixed
+here — core's 2.0 documentation describing the wrong plugin boundary, Bitcoin's
+binding claim, and missing licence files in the rail distributions. Those are
+unexamined here and are not claimed to be closed. See D19, D48, D52, D55.
+
+## D58 · Two ways the Ootle rail could credit money that was not a payment — reproduced and closed, 2026-08-31
+
+Both were found by an adversarial review that said *do not publish*, and both
+were reproduced here before being believed. Neither was visible to a suite that
+was green at 661 tests, 100% line coverage and full mutation coverage.
+
+### The rail said "committed" and never asked
+
+`settle()` has always returned the reason *"committed Ootle deposits are
+final"*. Finality on Ootle is a property of a **committed** transaction — and
+nothing in this adapter had ever read `summary.outcome`. It read
+`summary.finalized_at` beside it, from the same object, and stopped there.
+
+Reproduced on **both** paths, including the new per-sale binding: a transaction
+summary reading `{"outcome": "Abort", "finalized_at": ...}` settled a 5,000,000
+microTari sale and would have booked it, under a reason asserting the exact
+thing that was false. That is this register's most-repeated shape — a true
+condition wearing a false sentence (D25, D38, D39, D40) — and here the sentence
+was the guarantee itself.
+
+An uncommitted transaction is now **reported and not credited**: it becomes an
+unconfirmed `TransferObservation` with no block time, and the warning names the
+outcome. It is not dropped, because an indexer wrong about an abort would then
+rob a customer who really paid. A missing or unreadable outcome is treated the
+same way — fail-safe toward not booking goods.
+
+The rule lives in **one** function, `_observed_transfer`, called by the shared
+path and the component path. D35 is why: the copy nobody searches for is the
+copy that keeps the defect.
+
+### A baseline was the end of one read, not the end of the history
+
+`capture_baseline` called the event stream once. `chain._get_sse` returns what
+it has when its budget runs out — correct for observation, where the cursor
+makes a short read a *shorter* answer rather than a wrong one, and wrong for a
+baseline, where the cursor is the claim *nothing before this point is mine*. A
+shared account with more history than four seconds of replay handed back a
+cursor in the middle of its own past, and every deposit after it looked like a
+payment for a sale that did not exist yet. No attacker required; only time.
+
+The baseline is now **drained** — read, advance, read again — and a history that
+will not end within twelve pages is a refusal rather than a guess.
+
+**And the first version of the drain was wrong, because it trusted the
+docstring.** `_get_sse` says the endpoint sends a `:` comment while idle and
+calls that the replay boundary. Measured against `ootle-indexer-a.tari.com`:
+
+```
+after_id=0       4.56s  1983 bytes  5 events   tail = a complete data frame
+after_id=250652  4.34s  NO PAYLOAD              (the read simply timed out)
+```
+
+That comment never arrives. **Every** read on this endpoint costs its full
+timeout, and the end of a history looks like silence. The drain refused every
+baseline on the deployment it was written for until it was taught the
+difference — silence *after* a page has answered is the end; silence on the
+first read is still a dead endpoint; and an unparseable stream stays a refusal
+at every attempt, because silence and nonsense are different answers.
+
+The measured cost is honest and is written down: `capture_baseline` on the live
+component takes **9.7 s** (two reads), and a charge on `xtr` takes **14.5 s**.
+`chain._get_sse`'s docstring now records that its stated boundary is not the one
+that occurs here.
+
+Settlement is bounded at both ends (D57) and its reason no longer names only one
+of three causes — "after expiry" was already false for a deposit predating its
+sale, which D57 introduced and this corrects.
+
+### The gate's excuses had gone stale, and that failed silently
+
+`make worth` reported eight survivors. Six were killed with new boundary tests —
+the twelve-page bound on both sides, the hour of clock skew to the second, the
+128-byte reference at its accepted edge, a one-microTari amount, the
+confirmation count on a committed transfer with an unreadable clock. The
+seventh, `plugin.py:394`, was **already triaged** with a correct reason under the
+key `plugin.py:379`: fifteen lines had been inserted above it and the entry
+stopped matching anything.
+
+`EQUIVALENT` is keyed by line number, and line numbers move. A triage entry that
+stops matching fails **toward more work**, so it never looks like a defect in the
+list. `worth.py` now checks its own list against the run: every entry must name a
+mutation this run produced *and* that survived. It found **six** stale entries on
+its first execution, and all six turned out to be obsolete rather than misfiled —
+`rates.py` 108/108, `evm.py` 264/264 and `catalog.py` 32/32 kill every mutant
+they produce, and `addresses.py:127` is killed at its new line. The suite had
+grown past all six excuses and nobody knew.
+
+Green after: 678 core tests, `make check` clean across 3.9/3.11/3.13/3.14 and
+against the built wheel, `make prove` 100% with every symbol registered,
+`make worth` 2262/2273 with 11 accepted, the app harness 85/85, `rails_agree.sh`
+OK. `xtr` charged live: `CPS-2026-00464`, `binding: per-sale`, reference
+`HMQW-4T3X-642N`.
+
+See D19, D25, D35, D46, D48, D49, D50, D53, D57.
+
+## D59 · Asking what a rail's binding is was allocating a Bitcoin address — 2026-08-31
+
+D54 merged two copies of the binding rule into `catalog.binding_label`. The
+merged function opens with:
+
+```python
+if not (recipient_for(rail, mode) or ""):
+```
+
+`recipient_for` does not report where money is received. On a rail with an xpub
+it **derives the next address, advances `next_address_index`, and holds a
+`FOR UPDATE` row lock** while doing it. So a function whose name says it labels
+was spending the operator's addresses to answer a question.
+
+Reproduced: one `api.rails()` — what a till does every time it draws its rail
+list — moved `btc`'s `next_address_index` from 2 to 3, with no sale in
+existence. `charge()` was worse: it called `recipient_for` for the address and
+then `binding_label` called it again, so **every real Bitcoin sale consumed two
+indices and recorded the first**.
+
+Nothing was stolen and no money is unrecoverable — an xpub re-derives any index.
+What it costs is BIP-44's twenty-address gap limit, eaten at twice the rate, and
+past that gap a wallet restored from the account key stops scanning and does not
+find the money. The rails list is also reachable from an endpoint with no role
+guard (D37), so the counter could be advanced by anything that could call it.
+
+`catalog.receiving_material(rail, mode)` is the pure predicate the label
+actually needed — it reads the row and returns `xpub`, `component`, `address` or
+`""`. `binding_label` is built on it and allocates nothing. Verified: five
+consecutive `api.rails()` calls now consume **zero** addresses, and every rail's
+reported binding is unchanged.
+
+It is the same shape as the defect it was introduced to fix: a function whose
+name says it reports, doing something underneath.
+
+**And the rule had a fourth home.** `tools/snapshot.py` computed its own,
+knew nothing about payment components, and printed `xtr SHARED` on the same
+afternoon the till correctly printed `per-sale`. It calls `binding_label` now,
+and keeps its own distinction between a binding that is a FACT (a derived
+address, a named component) and one that is a CLAIM an adapter makes about
+itself (D33) — which is real information the shared function does not carry.
+
+**A third copy of the prose was in the database.** `Crypto Rail` rows hold a
+frozen snapshot of the library's `binding` and `gate_text`, refreshed only by
+`seed_rails()` on migrate. D48 corrected "exact-amount match" in the library, the
+till and three READMEs; the operator's own row still said it hours later. The
+library's sentence was itself stale in the other direction — it called the
+payment component a thing that "would bind exactly and is a new contract", which
+stopped being true the day it was deployed. Both corrected, and the rows
+re-seeded: 11 fields refreshed.
+
+See D33, D35, D37, D45, D48, D54.
+
+## D60 · What the published packages had to catch up on before the tunnel could go in front of them — 2026-08-31
+
+Two cold reviews said *do not publish* and listed blockers. Every one below was
+reproduced here before it was fixed; the reproductions are what make them
+findings rather than opinions.
+
+### The published rail was a version behind the rail that works
+
+`published/cryptopos-rail-ootle` had **none** of the per-sale payment component
+(D49–D54). Publishing it would have shipped, as the only mode, the shared-account
+binding that D48 measured settling the wrong sale — with the safe mode sitting
+in the working tree unshipped. The package is now regenerated mechanically from
+the proven core source, and the only differences are three intended ones: the
+distribution's own `__version__`, the import rewrites, and `_coerce_integer`
+**inlined rather than imported**.
+
+That last one is the review's finding and it is real: the package declared
+`cryptopos-core>=2,<3` while importing a leading-underscore name from it. A
+resolver honouring that range may pick a later 2.x that has moved the private
+helper, producing an install that succeeds and a rail that fails on import.
+Twenty lines copied verbatim is cheaper than a dependency on somebody else's
+private detail.
+
+Rail suite: 131 → **159 tests**, green. The abort and drain reproductions were
+re-run against the published package, not only against core.
+
+### Three distributions shipped `License: MIT` and no licence
+
+Verified in the built wheels and sdists: no `LICENSE` file in bitcoin, evm or
+ootle. Recipients of `chain.py` — this project's own code, extracted from core —
+were given no copyright notice, no permission grant and no warranty disclaimer.
+Fixed and verified in the rebuilt artifacts:
+`<dist>-info/licenses/LICENSE` present in every wheel, `LICENSE` in every sdist.
+
+### Documentation that described a package that no longer exists
+
+Executed rather than read, all against the built 2.0 wheel:
+
+* `registry.get("bitcoin:testnet4/native:btc")` after the README's own
+  quickstart → `RailNotInstalled`. `register_builtins()` registers **six
+  request-only** rails, none of them Bitcoin, EVM or Ootle.
+* `import cryptopos_core.chain` → `ModuleNotFoundError`. The README used it in
+  an example and the package docstring advertised it, along with `bitcoin`,
+  `evm` and `ootle`.
+* The README claimed 579 tests; the suite runs 444.
+* The "Built-in scope" table listed rail-package capabilities as core built-ins,
+  and marked `Polygon Amoy / POL` as observe-no / settle-no when
+  `cryptopos-rail-evm` drives it.
+
+All corrected against what the packages actually do, the table rebuilt from an
+enumeration of the `cryptopos.rails` entry points in an environment holding all
+four distributions.
+
+`SECURITY.md` said Ootle attribution "relies on the static account plus exact
+amount inside the lock window". That is D48's false sentence surviving in the
+**security model document** — the claim is stronger than the code makes, and
+unique per-sale amounts are not a remedy for a running total. Corrected there
+and in the EVM README, which had the same sentence and had shipped it inside a
+wheel's `METADATA`.
+
+Bitcoin's README called its binding "per-sale — a fresh address derived from the
+merchant's watch-only account key". **The adapter derives nothing**; it refuses
+an address with transaction history and the host supplies the address. The
+distinction matters because the check cannot see the case that hurts: two
+concurrent sales handed the same never-used address both pass `capture_baseline`,
+and the first to poll takes the other's money. Now stated as the sequence.
+
+And a stale test: `test_installed_version_and_rail_entry_points_match_the_source`
+asserted core advertises four entry points naming `cryptopos_core.bitcoin` and
+`cryptopos_core.evm` — modules the 2.0 split had already removed. It had been
+failing since. It now asserts core advertises **none**, which is the load-bearing
+claim of the split.
+
+Published suites after: core 444, bitcoin 32, evm 43, ootle 159 — all green. The
+built ootle wheel was installed clean on **Python 3.9**, resolved through its
+entry point, and drives the payment component.
+
+### The origin the tunnel would have fronted was answering 502
+
+Found by accident, testing a `Host` header. The frontend had been returning
+**502 Bad Gateway to every request for about two hours** and nothing in this
+repository noticed. `rails_agree.sh` was green, `reach_probe` was green in all
+four containers, the app harness passed 85/85 — every one of them asks about
+worker processes, and none asks whether the HTTP surface answers. The cause was
+ordinary: the backend restarted, took a new address on the Docker network, and
+the frontend's nginx held the old one. `nginx -s reload` fixed it.
+
+`erpnext-hr/origin_probe.sh` now asks the question a published instance lives on:
+the origin answers 200 under the local name **and** the public one, Frappe itself
+answers `/api/method/ping` through the public host header, port 8080 **refuses
+every non-loopback address on this host**, and `cloudflared` routes the hostname
+to that origin. Reachability is asked from outside loopback because a bind to
+`0.0.0.0` is invisible from `127.0.0.1` — the check that matters cannot be run
+from the side that always works.
+
+**Every check has been seen red**: the backend stopped (3 fail, exit 1), a
+throwaway listener on `0.0.0.0` (3 fail on three interfaces), and a hostname the
+ingress does not route (1 fail). A check that cannot be seen failing is a check
+nobody knows the direction of. It reports `UNVERIF` and exits 1 rather than
+passing when it cannot run — `audit-secrets.sh` learned that the expensive way.
+
+### Where publication stops, and why it stops there
+
+Ready and verified: the ingress rule for `<the published hostname>` →
+`http://127.0.0.1:8080` (`cloudflared tunnel ingress validate` OK, rule matching
+checked for three hostnames), the site's `host_name`, and the origin probe green.
+
+**No DNS record was created and the tunnel was not started.** CONTINUE.md §1
+Decision 2 makes the instance operator-only behind Cloudflare Access, and
+`~/.cloudflared/cert.pem` carries tunnel scope only — it can create a DNS route
+and cannot create an Access application. A DNS record plus a running tunnel
+without Access is the ERPNext login on the public internet, in front of a
+surface where any authenticated `Sales User` can fabricate a settled sale that
+the five-minute `sweep_unbooked` turns into a real Sales Invoice. the maintainer chose
+Access first, which is the order Decision 2 already implied.
+
+See D37, D48, D49, D57, D58.
+
+## D61 · A cold review of D58's own fixes found a wrong-sale booking in them — 2026-08-31
+
+D58 closed two ways the Ootle rail could credit money that was not a payment.
+Attacking that work — the habit `CLAUDE.md` requires before an architecture
+call, applied here to a change already made — found **six defects in the fixes
+themselves**, one of them worse than what D58 had closed. Every claim was
+reproduced before it was accepted, and one was reproduced only after correcting
+my own test harness, which had been asking the wrong question.
+
+### The one that mattered: a 503 mid-drain settles the wrong sale
+
+`_drain` stopped when a page returned nothing, and "nothing" was
+`payload is None` — which `chain._get_sse` returned for an idle stream **and**
+for an HTTP 503, a DNS failure, a TLS failure and a connection reset. So:
+
+1. Baseline page one returns events through id 100.
+2. The read for `after_id=100` gets a 503.
+3. The drain reads that as the end of the account's history and returns 100.
+4. A new sale opens for 5,000,000 µT.
+5. The indexer recovers and replays a **30-minute-old** deposit as event 101.
+6. It is committed, unclaimed, inside the window — and it settles the new sale.
+
+Reproduced exactly. **This is the failure D58's drain was built to prevent,
+reintroduced by the drain's own termination test.** A guard whose stopping
+condition cannot tell success from failure is not a guard.
+
+The fix is at the layer that owns the distinction. `chain._get_sse` now tracks
+whether the connection was **established**: a socket that opened and then went
+quiet returns empty bytes (the endpoint answered, and had nothing), while one
+that never opened returns `None`. `_replay` refuses anything that returned
+`None`, at every attempt, and the `silence_ok` flag is gone — there is nothing
+left for it to be wrong about.
+
+### Five more, all reproduced
+
+**A fresh payment component could not take its first sale.** Its event stream
+is legitimately empty, the read timed out with no bytes, and that was a
+refusal. The same fix closes it: an empty answer is an answer. Verified — a
+component with no history now yields a baseline of 0 and charges.
+
+**The twelve-page bound gave the rail a finite lifetime.** Every baseline
+replays from zero, so a component would hit the bound at roughly its sixtieth
+event and then refuse **every** later sale. That is not slowness; it is an
+expiry date, on the one path this project publishes.
+
+The fix is an asymmetry that should have been there from the start. On the
+component path the money **names the sale** — a 57-bit reference minted at
+charge time cannot appear in an older event — so the cursor is an optimisation
+and a short one cannot misattribute anything. That path now reads **one page**.
+Draining is kept only for the shared account, where the cursor *is* the
+attribution, and its refusal message names the remedy that exists. Measured:
+a component with 200 events of history charges, and its next sale settles.
+The live charge went from **14.5 s to 10.5 s**.
+
+**One transient 503 on the transaction read cost a customer their sale.**
+`_observed_transfer` discarded the reason, so "the indexer says Abort" and
+"the indexer did not answer" produced the same unconfirmed transfer under the
+same sentence — *"an uncommitted transaction moved no money"* — which the code
+had no evidence for. `needs-review` is terminal (D10), so the indexer
+recovering a second later changed nothing.
+
+`_Unresolved` now carries *the provider did not answer* as a thing distinct
+from *the provider said no*, and settlement returns **PENDING** for it: nothing
+was decided, so keep polling. **And that alone was only half a fix** — the
+cursor advances past an event once seen and `extend` refuses a page repeating a
+transaction id, so the doubt could never be revisited and the sale merely
+stopped being wrongly refused and started quietly expiring, which costs the
+customer exactly as much. `_resolve_outstanding` re-asks about those
+transactions on the next poll, before reading anything new. Proven both ways: a
+recovered read settles the sale, a still-failing one stays pending.
+
+**The transaction body's own id was never checked.** An event naming
+transaction A paired with a cached body for transaction B took B's `Commit` and
+timestamp and credited A's amount — the outcome check certifying money it had
+never looked at. Now a mismatch is unresolved, not settled.
+
+**`ObservationBatch` gained `unresolved_transaction_ids`**, optional with a
+default, for D43's reason. That makes the rail depend on a core feature, so
+published core is **2.1.0** and the rail's floor is `>=2.1,<3`. Verified by
+resolution rather than by reading: offered only core 2.0.0, the resolver now
+refuses instead of producing an install that succeeds and fails on the first
+sale.
+
+### What the gates did and did not do
+
+`make worth` caught four survivors afterwards, and one of them was real: the
+`connected` flag had no test, because every stub returned bytes immediately and
+never exercised a timeout on an open socket. Another was a redundant
+`credited < amount` in a branch the settled path had already returned from —
+deleted rather than excused, because a dead condition is how code rots.
+
+**And the EQUIVALENT staleness check D58 added earned itself twice in one
+session**: `plugin.py:394` moved to `413` when the new field was added, and the
+check said so instead of reporting a survivor that had been explained months
+before.
+
+Green: 686 core tests, `make check` across 3.9/3.11/3.13/3.14 and against the
+built wheel, `make prove` 100% with every symbol registered, `make worth`
+clean, published suites core 444 / bitcoin 32 / evm 43 / ootle 167,
+`rails_agree.sh` OK, `origin_probe.sh` green. Live: `CPS-2026-00475` charged on
+`xtr`, `binding: per-sale`.
+
+**The lesson is the one this register keeps recording, one level up.** D58's
+fixes were reasoned about carefully, tested, mutation-tested and green — and
+two of them were wrong in the direction they were meant to protect. What found
+it was not a gate. It was asking somebody who had not written them.
+
+See D10, D19, D43, D48, D57, D58.
+
+## D62 · The instance is published, and the check that matters is not the one that is easy — 2026-09-01
+
+`https://<the published hostname>` is live: ERPNext through the existing Cloudflare
+tunnel, behind an Access application whose single policy admits one email and
+denies everything else. Decision 2 of `CONTINUE.md` §1 is satisfied rather than
+deferred.
+
+### Two credential facts that cost a round trip each
+
+**A 200 from a read endpoint proves Read.** The `cfat_` account token listed
+Access applications cleanly, and that was reported here as though it settled
+whether the token could create one. It could not: `POST .../access/apps` →
+`1010 auth.forbidden`. The working token is a `cfut_` **user** token with
+Access: Apps and Policies **Edit**, expiring 2026-09-11.
+
+**Neither token can touch DNS.** The record was created by `cloudflared` off
+`cert.pem`, and the `discord-activity` record was deleted through the API token
+embedded inside that same file — which is worth knowing, because it means
+`cert.pem` carries more authority over the zone than either API token issued
+for this work.
+
+### The verification, and the two checks that were worthless
+
+The easy check is worthless: `https://<anything>.cloudflareaccess.com` returns
+**200** for a team name invented on the spot, so "the team domain answers" says
+nothing. The discriminator is `/cdn-cgi/access/get-identity` — **400** on a real
+organization (it exists, you have no identity) against **404** and a 34 KB error
+page on one that does not.
+
+The second worthless check was mine. Five surfaces were tested unauthenticated
+from outside — the desk, `/api/method/ping`, `cryptopos.api.rails`, `/login`
+and a static asset — and one came back **NOT GATED**. It was the detector: the
+Access sign-in page echoes `redirect_url`, the asset path is
+`/assets/frappe/images/...`, and the string `frappe` in the response was my own
+request reflected back. Confirmed by looking: the body is not an SVG, carries
+`cdn-cgi/access`, and both matches sit inside the reflected URL. **A security
+check must not be wrong in either direction**, and a false "open" is as bad as
+a false "closed" because it sends the next session chasing a hole that is not
+there.
+
+All five land on `<team>.cloudflareaccess.com`, title *Sign in ・ Cloudflare
+Access*, no Frappe markers.
+
+### What is published, exactly
+
+One hostname. The `discord-activity` ingress rule was removed at the maintainer's request
+and its DNS record deleted — confirmed gone from `1.1.1.1`, `8.8.8.8` and the
+zone's own authoritative nameserver, which is worth checking separately because
+the local resolver served the deleted name from cache for minutes afterwards.
+`<the published hostname>` is now the only record in the zone, and anything else
+reaching the tunnel gets `http_status:404`.
+
+The tunnel is still **named** `discord-activity`. Renaming it would invalidate
+the credentials file and every reference to the UUID while changing nothing
+about what it serves.
+
+### What is NOT done, said plainly
+
+**`cloudflared` is not a service.** It was started by hand and nothing restarts
+it, so a reboot takes the instance offline. `sudo cloudflared service install`
+is the fix; it needs root and was not requested, so it was not done.
+
+The abuse limits of GOAL step 8 are unchanged and still open. Access removes the
+anonymous-stranger threat model, not the authenticated-operator one: D37's three
+unscoped surfaces are answered by there being one trusted principal, which is a
+hosting decision and not a repair.
+
+See D37, D57, D60, D61, and `CONTINUE.md` §1 Decision 2, §7.

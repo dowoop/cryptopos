@@ -192,7 +192,11 @@ def poll(sale_name):
 		return sale.state
 
 	lock_expired = now_datetime() > get_datetime(sale.rate_lock_end)
-	configuration = {"endpoint": extras.get("endpoint") or ""}
+	configuration = {
+		"endpoint": extras.get("endpoint") or "",
+		# From the SALE's snapshot, never re-read from the row. See charge.py.
+		"payment_component": extras.get("payment_component") or "",
+	}
 	source = adapter.key
 
 	try:

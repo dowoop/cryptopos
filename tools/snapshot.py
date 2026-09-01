@@ -41,7 +41,8 @@ def run():
     settings = frappe.get_single("CryptoPoS Settings")
     rails = frappe.get_all(
         "Crypto Rail", filters={"enabled": 1},
-        fields=["name", "catalog_key", "testnet_xpub", "testnet_recipient", "unit_name"],
+        fields=["name", "catalog_key", "testnet_xpub", "testnet_recipient",
+                "payment_component", "unit_name"],
         order_by="name")
     adapters = catalog.plugins()
     external = [key for key in adapters if catalog.adapter_identity(key) != "builtin"]
@@ -58,20 +59,26 @@ def run():
         print(f"         REFUSED:   {refusal}: {why[:70]}")
 
     binding = []
-    from cryptopos_core.plugin import UNCONDITIONAL_PER_SALE
+    mode = settings.mode or "testnet"
 
     for rail in rails:
-        adapter = adapters.get((rail.get("catalog_key") or "").strip())
-        # The binding category is a CLAIM the adapter makes about itself, and
-        # one such claim was false for an hour on 2026-08-25 (D33). A derived
-        # address is a fact; a declaration is an assertion. They are printed
-        # differently on purpose.
-        if (rail.get("testnet_xpub") or "").strip():
-            binding.append(f"{rail['name']} per-sale")
-        elif catalog.declared_binding_category(adapter) == UNCONDITIONAL_PER_SALE:
-            binding.append(f"{rail['name']} per-sale(claimed)")
-        else:
-            binding.append(f"{rail['name']} SHARED")
+        # THE LABEL COMES FROM `catalog.binding_label`, and this file used to
+        # compute its own. D54 found the rule living in two places and merged
+        # them; it did not find this, the third -- so on 2026-08-31 the till
+        # correctly reported `xtr` as per-sale while THIS said SHARED, because
+        # the copy here had never heard of a payment component. Understating a
+        # guarantee makes nobody suspicious, which is why it survived a day.
+        label = catalog.binding_label(frappe._dict(rail), mode)
+        if label != "per-sale":
+            binding.append(f"{rail['name']} {label.upper() or 'NO RECIPIENT'}")
+            continue
+        # Still printed differently, and D33 is why: a derived address and a
+        # named component are FACTS about where money lands, while an adapter's
+        # `binding_category` is a CLAIM it makes about itself -- and one such
+        # claim was false for an hour on 2026-08-25.
+        material = catalog.receiving_material(frappe._dict(rail), mode)
+        evidence = material in (catalog.XPUB, catalog.COMPONENT)
+        binding.append(f"{rail['name']} per-sale" if evidence else f"{rail['name']} per-sale(claimed)")
     print(f"rails    {len(rails)} enabled: {' · '.join(binding)}")
 
     counts = {}

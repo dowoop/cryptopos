@@ -166,11 +166,11 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 	# once already by editing four version bytes.
 	address = catalog.recipient_for(rail, mode)
 	identity_source = "config" if address else "none"
-	binding = (
-		"per-sale"
-		if mode == "testnet" and (getattr(rail, "testnet_xpub", "") or "").strip()
-		else "shared" if identity_source == "config" else ""
-	)
+	# One implementation, in catalog.binding_label. The copy that used to live
+	# here knew about xpubs and nothing else, so a rail bound by a payment
+	# component reported `shared` -- understating a guarantee, which is the
+	# rarer and quieter direction of the same defect D48 recorded.
+	binding = catalog.binding_label(rail, mode)
 
 	if identity_source == "none":
 		frappe.throw(
@@ -264,6 +264,11 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 			"identity_extras": json.dumps(
 				{
 					"endpoint": endpoint,
+					# Snapshotted for the same reason the endpoint is: a sale is
+					# observed in the world it was charged in. Repointing the row
+					# at a different component mid-flight must not re-attribute
+					# money that has already arrived.
+					"payment_component": (rail.get("payment_component") or "").strip(),
 					"gate": rail.gate_for(mode),
 					"catalog_key": adapter.key,
 					# WHICH IMPLEMENTATION, not just which money. `catalog_key`
