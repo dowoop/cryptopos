@@ -4496,3 +4496,154 @@ The durable fix is baking the plugins into the image so a recreate cannot drop
 them. That is not done. Until it is, this is detection plus a one-command
 recovery, which is honest but is not the same thing.
 
+
+---
+
+## D64 · An agent mints its own Ootle identity — TAKEN, 2026-09-01
+
+Proving a sale end to end needed `OOTLE_KEY_PASSPHRASE`, which unseals the
+dev-bench customer key holding ~989 XTR. Handing that to an autonomous agent
+was the only route, and it is now unnecessary.
+
+**The capability already existed and nobody had assembled it.** `toolkit
+devbench account` mints a key — a fresh one is written PLAINTEXT, so no
+passphrase is involved; `devbench faucet` CREATES the account substate and
+funds it, 1,000 XTR a grant, from the on-chain faucet; `devbench pay-sale`
+withdraws from the agent's own account and pays its own fee. Measured: the
+agent's balance fell by 5,004,401 µT for a 5,000,000 µT sale, so the merchant
+sponsored nothing. `OOTLE_DEVBENCH_N` gives each identity its own key file.
+
+`Point of Sale/agent_wallet.py` is the assembly, and its value is the
+refusals rather than the happy path. Proven end to end: CPS-2026-00533 booked
+ACC-SINV-2026-00120.
+
+### Four defects found by attacking it, each reproduced first
+
+**The whitelist checked the wrong argument.** `_run` approved `argv_tail[1]`
+while the toolkit dispatches on `argv_tail[0]`, so
+`["submit-request", "account", "sig.json"]` passed the guard. Confirmed
+against the real binary: it *executed* `submit-request`, failing only because
+the named file did not exist. That verb seals whatever CBOR it is handed with
+the MERCHANT's wallet, so the agent chooses the instructions and the merchant
+supplies the authority. Callers no longer supply argv at all — `_argv_for`
+builds it from a closed table, which removes the argument the attacker was
+supplying rather than inspecting it more carefully.
+
+**A slot above u32 is slot 1.** `devbench_n()` parses `u32` and does
+`.unwrap_or(1)`, so 4294967296 does not overflow — it silently becomes the
+sealed key. A lower bound alone does not close the fallback; it needs a range.
+
+**A per-identity faucet cap caps nothing**, because minting is free:
+`for i in range(10000): mint(f"a-{i}"); fund(f"a-{i}")` takes ten thousand
+first grants. The budget that binds is global, counts grants rather than
+identities, and `retire` deliberately does not decrement it — otherwise
+retiring is the reset, which the per-identity refusal message was literally
+advising.
+
+**It paid twice, and that one cost money.** A watch timed out, the result said
+"the payment did not commit", the natural retry was made, and CPS-2026-00534
+settled having been credited **10,000,000 µT against a 5,000,000 µT invoice**.
+Both payments had landed. The toolkit had carried the transaction id in its
+error all along. Retry-safety no longer depends on parsing the toolkit at all:
+the attempt is written to the registry keyed by `sale_ref` *before* the child
+starts, a second call for that reference is refused, and every non-commit is
+INDETERMINATE rather than failed. **Absence of proof of success is not proof
+of failure** — and the inverse, treating unknown as success, would be the same
+defect facing the other way.
+
+### What it does NOT claim
+
+It is a safety rail, not a security boundary. Code running as this Unix user
+defeats it: it can read `os.environ`, read the key files, run the toolkit, or
+edit the module. The child still loads the merchant's operational key before
+dispatching `devbench`. The guarantee holds only for a consistent
+registry/key directory, no concurrent lifecycle operations on one identity,
+and cooperative callers. The docstring carries that in the reviewer's words,
+not mine, because the first version claimed more and the claim was false.
+
+**And the harness was green over the whitelist bypass**, because it replaced
+`_run` with a stub and then asserted against its own replacement. It now
+drives the production runner against a recording shell script, so argv
+construction, the pinned slot, the stripped passphrase and the pinned HOME are
+asserted as the CHILD saw them. 125 checks.
+
+---
+
+## D65 · An Ootle sale is paid the way its binding says — TAKEN, 2026-09-01
+
+`customer_wallet.pay` routed every XTR sale to `ootle_pay.pay(address,
+amount)` — `devbench pay`, a `public_transfer`. The rail has bound per-sale
+through a payment component since CPS-2026-00452, and `cryptopos_core.ootle`
+says what a plain transfer does, in the code that builds the request:
+
+> a plain transfer to this address names no sale and will not be credited
+> [...] Saying "send to this address" here would take real money and never
+> credit it.
+
+So every XTR sale since then would have been paid into a vault it could not be
+attributed out of. **It was invisible because the branch was never reached**:
+`can_pay("xtr")` required a passphrase nobody sets. A guard that is never
+reached is not a guard, and the defect underneath it is still a defect.
+
+`prove_end_to_end.py --rail xtr --send` now runs with no passphrase. Verified
+at two ticket sizes: CPS-2026-00541 → ACC-SINV-2026-00127, and at the DEFAULT
+$1.00 CPS-2026-00538 → ACC-SINV-2026-00124, credited 20,000,000 of 20,000,000.
+
+### The destination was the wrong field, and the tree hid it
+
+A sale carries **two independent values**: `identity_address`, from the rail's
+`testnet_recipient`, and a snapshotted `payment_component` — and
+`cryptopos.watch` listens to the second. They are equal in this deployment and
+nothing enforces it; rail validation forbids an xpub beside a recipient and
+permits a recipient beside a *different* component. With
+`testnet_recipient = otl_esm_M` and `payment_component = component_A`, paying
+the address commits money to M while the watcher waits on A. The live proof
+had been passing on a configuration coincidence. The payer uses the component
+now, and the harness drives that split directly.
+
+**Address shape cannot identify semantics.** An ordinary Ootle account is a
+`component_` too — `agent_wallet.mint` returns one. The prefix now only ever
+forces a refusal; the carried binding decides.
+
+**Fetching is not propagating.** `pay_cryptopos_sale` read the reference and
+then built an identity without it, so it would have refused every
+component-bound sale for a value it had already fetched.
+
+### The runway guard measured the wrong number, twice
+
+It priced `xtr` from cents, which that rail refuses — `measure` dispatches it
+before any rate path because no honest USD/XTR quote exists — so every proof
+was refused as "unmeasurable", a true sentence about a measurement never given
+its input. Then it measured a flat 5,000,000 µT for every ticket, which is a
+**quarter** of the default run's real 20,000,000; the live 25c proof passed
+only because 25c is the one ticket equal to the constant. And it measured the
+dev-bench customer while the prover paid from an agent identity. All three
+now derive from the same tables the charge path uses.
+
+### The window, and what is irreducible
+
+A payment that commits after the sale's expiry is credited **nothing** —
+reproduced: a complete payment finalised one second late returns
+`needs-review`, `credited_native = 0`, the full amount `sighted`. The deadline
+now travels as a Unix epoch into **both** toolkit payment verbs and is re-read
+immediately before `send_transaction`, which is the last instant at which
+nothing is spent. The caller subtracts its margin first, so the child is given
+a *submission* deadline rather than the expiry and both ends refuse the same
+instant — given the raw expiry the toolkit would have submitted with one
+second left, which is exactly what the margin exists to prevent.
+
+**Not closed, and not claimed:** a transaction authorised at that final check
+can still be delayed in submission, propagation or consensus and finalise
+late. That is irreducible under the present component interface — `pay` takes
+an amount and a reference and no enforceable expiry. Closing it needs an
+on-chain deadline, or a settlement policy that accepts a correctly bound late
+payment. Separately, a payment that lands in time can still miss automatic
+credit if the watcher's final observation fails after expiry; that is
+settlement availability, not this guard.
+
+**The Rust guard has a Rust test**, because the Python harnesses drive fake
+toolkit processes and would have stayed green if both
+`refuse_if_window_closed()?` calls were deleted. It reads the source, excludes
+its own test module, asserts both call sites, and asserts nothing sits between
+the check and the submission. Seen red for a deleted call and for an inserted
+statement.
