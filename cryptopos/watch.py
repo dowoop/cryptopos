@@ -199,15 +199,46 @@ def poll(sale_name):
 	}
 	source = adapter.key
 
-	try:
-		batch = adapter.observe(intent, configuration)
-		while not batch.complete:
-			# A bounded read answers through a tip it names, not necessarily
-			# the chain tip. Settlement requires observations through the
-			# provider tip, so the pages are walked until they meet it.
-			batch = batch.extend(adapter.observe(intent, configuration, previous=batch))
-		decision = adapter.settle(intent, batch, _claimed_transaction_ids(sale))
-	except Exception as unreachable:
+	# ASK TWICE, AND ONLY WHEN THE ANSWER IS FINAL.
+	#
+	# A look that fails mid-window costs nothing: the sale stays where it is
+	# and the next heartbeat asks again. The LAST look has no next heartbeat,
+	# so a single refused read there ends the sale in `needs_review` forever
+	# and puts it on a human's desk.
+	#
+	# Measured on this deployment 2026-09-02: **18 of 26 sales in the review
+	# queue** were that one sentence -- "the last look never reached the
+	# chain" -- every one of them with nothing ever sighted. Ootle reads are
+	# slow enough to make it common (every read of the event stream costs its
+	# full four-second timeout), so the queue was mostly unpaid sales whose
+	# final read happened to time out.
+	#
+	# Retrying is safe because neither call writes: `observe` reads the chain
+	# and `settle` is a decision over what was observed plus the claimed set.
+	# Nothing is credited until after this block, so a second look cannot pay
+	# anything twice. It costs one extra read on the failing path only.
+	#
+	# This does NOT weaken "unknown is not unpaid". Two failed looks still end
+	# in `needs_review` saying the terminal could not check -- the sentence is
+	# simply now earned by two attempts rather than one.
+	batch = decision = None
+	unreachable = None
+	for _attempt in range(2 if lock_expired else 1):
+		try:
+			batch = adapter.observe(intent, configuration)
+			while not batch.complete:
+				# A bounded read answers through a tip it names, not necessarily
+				# the chain tip. Settlement requires observations through the
+				# provider tip, so the pages are walked until they meet it.
+				batch = batch.extend(adapter.observe(intent, configuration, previous=batch))
+			decision = adapter.settle(intent, batch, _claimed_transaction_ids(sale))
+		except Exception as error:
+			unreachable = error
+			continue
+		unreachable = None
+		break
+
+	if unreachable is not None:
 		# The look failed. If the lock still has time, this is just a missed
 		# heartbeat and the sale stays where it is. If it does not, the sale
 		# ends -- and it ends saying the terminal could not check, because
@@ -217,11 +248,11 @@ def poll(sale_name):
 			sale.transition_to(
 				"needs_review",
 				source=source,
-				detail=f"final look did not reach the chain: {_why(unreachable)}",
+				detail=f"final look did not reach the chain, twice: {_why(unreachable)}",
 				end_kind="unverified",
 				review_reason=(
-					"The rate lock ran out and the last look never reached the "
-					"chain, so the terminal cannot say whether this was paid."
+					"The rate lock ran out and the last two looks never reached "
+					"the chain, so the terminal cannot say whether this was paid."
 				),
 			)
 		else:

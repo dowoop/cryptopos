@@ -812,6 +812,93 @@ async function main() {
 		);
 	}
 
+	// -----------------------------------------------------------------
+	// 13. Cover this charge — the button every visitor pays with.
+	//
+	// It shipped with no test of any kind, which `make prove` reported as
+	// two never-reached parts (`cover` and `[data-act="cover"]`) and which
+	// nothing else could have caught: the render suite next door proves the
+	// button is DRAWN, and a button whose handler was never wired renders
+	// exactly the same as one that works. On a public instance with no
+	// wallet in the visitor's hands this control IS the demo, so it is the
+	// last one that should have been going untested.
+	// -----------------------------------------------------------------
+	{
+		// `cover_html` gates on the rail: only `xtr` has a payer that is not
+		// the customer's own wallet, so the fixture has to say so.
+		const XTR = { rail_key: "xtr", unit_name: "microTari", invoiced_native: "5000000" };
+		let answer = sale(XTR);
+		const { harness, terminal } = await booted({
+			"cryptopos.api.charge": () => sale(XTR),
+			"cryptopos.api.poll": () => answer,
+			"cryptopos.api.request_cover": () => ({
+				name: "CPS-2026-00001",
+				demo_cover_state: "requested",
+				queued: true,
+			}),
+			"cryptopos.api.loyalty_status": () => LOYALTY,
+		});
+
+		keyIn(terminal, "42");
+		click(terminal, '[data-act="charge"]');
+		await settle();
+		check("an xtr sale offers to be covered", exists(terminal, '[data-act="cover"]'));
+
+		click(terminal, '[data-act="cover"]');
+		await settle();
+		const asks = harness.server.callsTo("cryptopos.api.request_cover");
+		check("pressing it asks the house exactly once", asks.length === 1, String(asks.length));
+		check("and it names the sale it is asking about", asks[0].args.sale_name === "CPS-2026-00001");
+		check(
+			"the visitor is told the house was asked, not that it paid",
+			htmlOf(harness, terminal).includes("Asked the house to cover this")
+		);
+		check("the offer is withdrawn once asked", !exists(terminal, '[data-act="cover"]'));
+		check(
+			"asking starts the watch, so nobody has to press Poll",
+			terminal.autopoll === true
+		);
+
+		// A REFUSAL HAS TO REACH THE VISITOR, VERBATIM. This is the whole
+		// reason `demo_cover_note` exists: without the reason on screen, a
+		// sale the house declined is indistinguishable from one nobody has
+		// looked at, and the visitor watches it expire in silence.
+		answer = sale({
+			...XTR,
+			demo_cover_state: "refused",
+			demo_cover_note: "the demo wallet holds 254,759,987 uT and this needs 1,000,000,000",
+		});
+		click(terminal, '[data-act="poll"]');
+		await settle();
+		const refusedHtml = htmlOf(harness, terminal);
+		check("a refusal says the house did not cover it", refusedHtml.includes("The house did not cover this"));
+		check(
+			"and carries the reason word for word",
+			refusedHtml.includes("the demo wallet holds 254,759,987 uT and this needs 1,000,000,000")
+		);
+	}
+
+	// -----------------------------------------------------------------
+	// 14. The other side of that predicate: a rail the house cannot pay.
+	// -----------------------------------------------------------------
+	{
+		const { harness, terminal } = await booted({
+			"cryptopos.api.charge": () => sale({ rail_key: "btc" }),
+			"cryptopos.api.poll": () => sale({ rail_key: "btc" }),
+		});
+		keyIn(terminal, "42");
+		click(terminal, '[data-act="charge"]');
+		await settle();
+		check(
+			"a btc sale offers no cover button -- the demo payer settles xtr only",
+			!exists(terminal, '[data-act="cover"]')
+		);
+		check(
+			"and it does not offer the house's help in words either",
+			!htmlOf(harness, terminal).includes("Cover this charge")
+		);
+	}
+
 	report.report();
 }
 

@@ -167,6 +167,47 @@ function terminal() {
 	check("a clean settle says SETTLED", html.includes("SETTLED"));
 	check("a settled sale links its invoice", html.includes("ACC-SINV-0001"));
 
+	// THE REGRESSION. An ordinary settled sale sights exactly what it credits,
+	// and the old test was `sighted_native > 0`, which is true of every one of
+	// them. So the receipt carried "could not be bound to this sale. It is not
+	// booked." on the line above "Booked as ACC-SINV-0001" -- measured live at
+	// 41 of this instance's 57 confirmed sales, none of which had a single
+	// unbound unit. The block belongs to the REMAINDER, so a sale that bound
+	// everything it saw must not render it at all.
+	t.sale = sale({
+		state: "confirmed",
+		end_kind: "clean",
+		credited_native: "39685",
+		sighted_native: "39685",
+		sales_invoice: "ACC-SINV-0003",
+		bookable: true,
+	});
+	html = t.done_html();
+	check(
+		"a sale that bound everything it sighted renders no unbound block",
+		!html.includes("cpos-sighted")
+	);
+	check(
+		"and it does not tell a paying visitor the money was not booked",
+		!html.includes("could not be bound") && html.includes("ACC-SINV-0003")
+	);
+
+	// The other side of the same predicate: a PART-bound sale must still name
+	// what it could not bind, and must name the remainder rather than the
+	// whole sighting -- 50,000 seen, 39,685 bound, 10,315 unaccounted for.
+	t.sale = sale({
+		state: "needs_review",
+		end_kind: "under",
+		credited_native: "39685",
+		sighted_native: "50000",
+	});
+	html = t.done_html();
+	check("a part-bound sale still reports its unbound remainder", html.includes("cpos-sighted"));
+	check(
+		"and the figure is the remainder, not the whole sighting",
+		html.includes("10,315") && !html.includes("50,000")
+	);
+
 	t.sale = sale({ state: "confirmed", end_kind: "over", credited_native: "1000000", sales_invoice: "ACC-SINV-0002", bookable: true });
 	html = t.done_html();
 	check("an overpayment is named as one", html.includes("More arrived than was invoiced"));

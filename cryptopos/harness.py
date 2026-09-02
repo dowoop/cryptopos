@@ -349,12 +349,20 @@ def run():
 	"""
 	borrowed = _snapshot_settings()
 	sweep = _pause_sweep()
+	# AND THE COVER QUEUE, because the payer that drains it is NOT a Frappe
+	# job and cannot be stopped the way the sweep can. Without this the
+	# host-side payer claims the harness's own test requests and pays them:
+	# measured on 2026-09-02, 500,000,000 uT of real testnet money spent on a
+	# $25.00 test sale that this file then deleted. A test that can spend
+	# money is not a test.
+	api_module.pause_covers()
 	try:
 		return _run_checks()
 	finally:
 		_cleanup()
 		_restore_settings(borrowed)
 		_resume_sweep(sweep)
+		api_module.resume_covers()
 
 
 def _run_checks():
@@ -599,9 +607,95 @@ def _run_checks():
 		any(row["sale"] == retried.name for row in settle_module.unbooked()),
 	)
 
+	# THE HANDLER THAT COULD NOT HANDLE.
+	#
+	# `book` rolls back to a savepoint when the ledger refuses, and that
+	# rollback can itself raise. A deadlock or lock-wait timeout makes MariaDB
+	# roll the whole transaction back on its own, which DISCARDS every
+	# savepoint in it, so the rollback fails with "SAVEPOINT cryptopos_book
+	# does not exist" -- raised from inside an `except` block, where nothing
+	# catches it. It escapes `book` and the watcher logs "cryptopos heartbeat
+	# failed" about a sale whose money has already arrived.
+	#
+	# Seen on four consecutive live sales on 2026-09-02, each of them in fact
+	# booked correctly by whichever caller won the race, so the only thing the
+	# escape produced was an error log shaped exactly like a failure to book.
+	# The item_code is still wrong here, so the ledger refuses and the handler
+	# is the code under test.
+	escaping = _charge(5000)
+	_settle_by_hand(escaping, int(escaping.invoiced_native))
+	original_rollback = frappe.db.rollback
+
+	def _rollback_that_lost_its_savepoint(*args, **kwargs):
+		if kwargs.get("save_point") or args:
+			raise Exception("SAVEPOINT cryptopos_book does not exist")
+		return original_rollback(*args, **kwargs)
+
+	frappe.db.rollback = _rollback_that_lost_its_savepoint
+	escaped = None
+	try:
+		settle_module.book(escaping)
+	except Exception as exception:
+		escaped = exception
+	finally:
+		frappe.db.rollback = original_rollback
+	check(
+		"a rollback that cannot find its savepoint does not escape book()",
+		escaped is None,
+		f"escaped {type(escaped).__name__}: {escaped}" if escaped else "nothing escaped",
+	)
+	escaping.reload()
+	check(
+		"...and the sale is still left unbooked for the sweep to retry",
+		not escaping.sales_invoice,
+		f"sales_invoice={escaping.sales_invoice}",
+	)
+
 	settings = frappe.get_single("CryptoPoS Settings")
 	settings.db_set("item_code", "CRYPTOPOS-SALE", update_modified=False)
 	frappe.clear_document_cache("CryptoPoS Settings", "CryptoPoS Settings")
+
+	# ONE PAYMENT, ONE INVOICE, however many callers ask for it.
+	#
+	# `book` opens by returning early if the sale already names an invoice,
+	# and that read used to take no lock -- so the browser's ten-second
+	# auto-poll and the scheduler's per-minute heartbeat could both pass it
+	# for the same sale and both submit. What actually prevented two invoices
+	# on this instance was a `tabCompany` deadlock rolling the loser back,
+	# which is luck, not design.
+	#
+	# THE SECOND CALLER MUST HOLD A STALE DOC, or this proves nothing.
+	#
+	# `book` opens with `if sale.sales_invoice: return`, which is an in-memory
+	# read. Reloading the document before calling again would satisfy THAT and
+	# never reach the lock -- the check would pass with the lock removed, which
+	# is the "green for the wrong reason" failure this file exists to avoid.
+	#
+	# The racing caller is one that loaded the sale BEFORE the winner booked
+	# it, so its copy still says unbooked. `stale` is that caller. Only the
+	# locked re-read against the database can catch it.
+	twice = _charge(1500)
+	_settle_by_hand(twice, int(twice.invoiced_native))
+	stale = frappe.get_doc("Crypto Sale", twice.name)
+	first = settle_module.book(twice)
+	invoices_before = frappe.db.count("Sales Invoice")
+	check("a sale books an invoice", bool(first), f"first={first}")
+	check(
+		"the racing caller's copy still says unbooked -- otherwise this proves nothing",
+		not stale.sales_invoice,
+		f"stale.sales_invoice={stale.sales_invoice!r}",
+	)
+	second = settle_module.book(stale)
+	check(
+		"a caller holding a stale sale gets the invoice that exists",
+		second == first,
+		f"first={first} second={second}",
+	)
+	check(
+		"...and writes no second invoice for one payment",
+		frappe.db.count("Sales Invoice") == invoices_before,
+		f"{frappe.db.count('Sales Invoice')} vs {invoices_before}",
+	)
 
 	swept = settle_module.sweep_unbooked()
 	retried.reload()
@@ -1165,6 +1259,219 @@ def _run_checks():
 		and value_card["fieldtype"] == "Currency"
 		and value_card["currency"] == "USD",
 		f"card={value_card} endpoint={unbooked_summary}",
+	)
+
+	# ---------------------------------------------------------------
+	# The LAST look is asked twice, and only the last one.
+	#
+	# WHAT THIS COST BEFORE IT EXISTED. On 2026-09-02 this deployment's
+	# review queue held 26 sales and **18 of them were one sentence** --
+	# "the rate lock ran out and the last look never reached the chain" --
+	# every one with nothing ever sighted. They were unpaid sales whose
+	# final read happened to time out, and each one demanded a human.
+	#
+	# A failure mid-window is free: the sale stays and the next heartbeat
+	# asks again. The last look has no next heartbeat, so one refused read
+	# ended the sale in `needs_review` permanently. It is asked twice now.
+	#
+	# The retry must NOT weaken "unknown is not unpaid" -- two failures
+	# still end in review -- and must NOT double the cost of an ordinary
+	# beat. All three are checked, because a retry seen working only in the
+	# rescuing direction is a retry of unknown direction.
+	# ---------------------------------------------------------------
+	class _Flaky:
+		"""The real adapter with `observe` made to fail a fixed number of times."""
+
+		def __init__(self, inner, failures):
+			self._inner, self._left = inner, failures
+			self.calls = 0
+
+		def __getattr__(self, name):
+			return getattr(self._inner, name)
+
+		def observe(self, *arguments, **keywords):
+			self.calls += 1
+			if self._left > 0:
+				self._left -= 1
+				raise RuntimeError("harness: simulated unreachable endpoint")
+			return self._inner.observe(*arguments, **keywords)
+
+	def _poll_with_failures(failures, expire_lock):
+		flaky_sale = _charge(2500)
+		if expire_lock:
+			flaky_sale.db_set(
+				"rate_lock_end",
+				add_to_date(now_datetime(), minutes=-1),
+				update_modified=False,
+			)
+			frappe.db.commit()
+		inner = catalog_module.plugin_for(frappe.get_doc("Crypto Rail", flaky_sale.rail_key))
+		flaky = _Flaky(inner, failures)
+		real_plugin_for = catalog_module.plugin_for
+		catalog_module.plugin_for = lambda rail: flaky
+		watch_module.catalog.plugin_for = lambda rail: flaky
+		try:
+			watch_module.poll(flaky_sale.name)
+		finally:
+			catalog_module.plugin_for = real_plugin_for
+			watch_module.catalog.plugin_for = real_plugin_for
+		return frappe.get_doc("Crypto Sale", flaky_sale.name), flaky.calls
+
+	# ---------------------------------------------------------------
+	# The cover queue: intent here, signing on the host.
+	#
+	# The container cannot pay -- the Ootle key is on the host -- so the
+	# button records a request and `demo_payer.py` claims it. What must hold
+	# here is that a request is never handed over twice, and that a sale which
+	# ENDED before the house got to it is resolved rather than left saying
+	# "paying" on a visitor's screen forever.
+	# ---------------------------------------------------------------
+	cover_eth = _charge(2500)
+	check(
+		"a cover is refused on a rail the house cannot pay",
+		_refuses(lambda: api_module.request_cover(cover_eth.name)),
+		"only xtr has a payer that is not the customer's own wallet",
+	)
+
+	# ANY REQUEST ALREADY IN THE QUEUE IS SOMEBODY ELSE'S. Claiming marks a
+	# sale `paying`, so a harness run must not swallow a live visitor's
+	# request and leave it marked for a payer that will never see it.
+	foreign = set(
+		frappe.get_all("Crypto Sale", filters={"demo_cover_state": "requested"}, pluck="name")
+	)
+
+	cover_sale = _charge(2500, "xtr")
+	queued = api_module.request_cover(cover_sale.name)
+	check("a cover request is queued", queued["queued"] is True, str(queued))
+	check("...as `requested`", queued["demo_cover_state"] == "requested",
+	      str(queued["demo_cover_state"]))
+	check(
+		"asking twice queues once",
+		api_module.request_cover(cover_sale.name)["queued"] is False,
+		"a second press must not create a second payment",
+	)
+
+	api_module.claim_covers(limit=25, peek=1)
+	check(
+		"a peek does not claim",
+		frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_state") == "requested",
+		"a dry run that consumed the queue would strand real requests",
+	)
+
+	ended = _charge(2500, "xtr")
+	api_module.request_cover(ended.name)
+	ended.reload()
+	ended.transition_to("expired", source="harness",
+	                    detail="ended before the house could pay it", end_kind="clean")
+	ended.save(ignore_permissions=True)
+
+	# THE PAUSE IS PROVED BEFORE IT IS BYPASSED. If this returned rows the
+	# protection would be decorative, and the next harness run would spend
+	# real money again.
+	check(
+		"a paused cover queue hands the payer nothing",
+		api_module.claim_covers(limit=25) == [],
+		"this is what keeps a harness run from spending real money",
+	)
+	check("...and the pause reads as on", api_module.covers_paused() is True,
+	      str(api_module.covers_paused()))
+
+	# `ignore_pause` is the harness's own key to the queue it locked. The
+	# pause stays up throughout, so the live payer never sees these requests.
+	claimed = api_module.claim_covers(limit=25, ignore_pause=1)
+	handed = {row["name"] for row in claimed}
+	for name in foreign & handed:
+		# Put somebody else's request back exactly as it was found.
+		frappe.db.set_value("Crypto Sale", name, "demo_cover_state", "requested",
+		                    update_modified=False)
+
+	check("a requested cover is handed to the payer", cover_sale.name in handed)
+	cover_after_claim = frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_state")
+	check(
+		"...and marked `paying` so it cannot be handed over twice",
+		cover_after_claim == "paying",
+		str(cover_after_claim),
+	)
+	check(
+		"a cover on a sale that ENDED is not handed over",
+		ended.name not in handed,
+		"paying it would put money into a window that has already shut",
+	)
+	ended_state = frappe.db.get_value("Crypto Sale", ended.name, "demo_cover_state")
+	check(
+		"...and is resolved rather than left saying `paying` forever",
+		ended_state == "refused",
+		str(ended_state),
+	)
+	check(
+		"...with a reason the visitor can read",
+		bool(frappe.db.get_value("Crypto Sale", ended.name, "demo_cover_note")),
+		frappe.db.get_value("Crypto Sale", ended.name, "demo_cover_note") or "(empty)",
+	)
+
+	api_module.report_cover(cover_sale.name, "refused", "harness: nothing was paid")
+	reported = frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_state")
+	check("the host can report back what it did", reported == "refused", str(reported))
+	reported_note = frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_note")
+	check(
+		"...and the reason lands on the sale",
+		reported_note == "harness: nothing was paid",
+		str(reported_note),
+	)
+
+	# A REFUSAL MUST NOT UN-PAY A SALE THE HOUSE ALREADY PAID.
+	#
+	# `claim_covers` marks a sale `paying` in an ordinary transaction, and a
+	# deadlock with the watcher writing the same row rolls that mark back to
+	# `requested`. The payer then claims it a second time and `pay_sale`
+	# correctly refuses to pay twice -- and that refusal used to be written
+	# straight over `covered`. Measured live on CPS-2026-00772: paid, settled
+	# on that transaction, booked, and recorded as not covered.
+	api_module.report_cover(cover_sale.name, "covered", "harness: the house paid it")
+	outcome = api_module.report_cover(
+		cover_sale.name, "refused", "harness: a duplicate attempt was suppressed"
+	)
+	check(
+		"a later refusal does not overwrite a cover that was paid",
+		frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_state") == "covered",
+		str(frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_state")),
+	)
+	check(
+		"...and the refusal's reason does not replace the payment's either",
+		frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_note")
+		== "harness: the house paid it",
+		str(frappe.db.get_value("Crypto Sale", cover_sale.name, "demo_cover_note")),
+	)
+	check(
+		"...and the caller is told it was not recorded rather than lied to",
+		outcome.get("recorded") is False and bool(outcome.get("why")),
+		str(outcome),
+	)
+
+	rescued, rescued_looks = _poll_with_failures(1, expire_lock=True)
+	check(
+		"one failed final look is retried, not turned into a review item",
+		rescued.state != "needs_review",
+		f"state {rescued.state} after {rescued_looks} look(s)",
+	)
+	check("...and the retry is a second look, not a re-read of the first",
+	      rescued_looks == 2, f"{rescued_looks} look(s)")
+
+	stranded, stranded_looks = _poll_with_failures(2, expire_lock=True)
+	check(
+		"two failed final looks still end in review -- unknown is not unpaid",
+		stranded.state == "needs_review",
+		f"state {stranded.state} after {stranded_looks} look(s)",
+	)
+	check("...saying both looks failed, which is what was earned",
+	      "two looks" in (stranded.review_reason or ""),
+	      stranded.review_reason or "")
+
+	beat, beat_looks = _poll_with_failures(1, expire_lock=False)
+	check(
+		"a failure with lock time left is ONE look and no transition",
+		beat_looks == 1 and beat.state == "awaiting",
+		f"state {beat.state} after {beat_looks} look(s)",
 	)
 
 	frappe.db.commit()

@@ -26,6 +26,14 @@ frappe.pages["terminal"].on_page_load = function (wrapper) {
 
 const POLL_SECONDS = 10;
 
+// The rails a non-operator may choose. See `offerable()` for why this exists
+// and why a constant here is the short version of a setting.
+const PUBLIC_RAILS = ["xtr"];
+
+// Rails the house can pay for a visitor. Must agree with
+// `cryptopos.api.COVERABLE_RAILS`; the server is the one that enforces it.
+const COVERABLE_RAILS = ["xtr"];
+
 class CryptoPosTerminal {
 	constructor(page) {
 		this.page = page;
@@ -54,9 +62,9 @@ class CryptoPosTerminal {
 		frappe
 			.call({ method: "cryptopos.api.rails" })
 			.then((r) => {
-				this.rails = r.message || [];
+				this.rails = this.offerable(r.message || []);
 				if (this.rails.length && !this.rail) {
-					this.rail = this.rails[0].name;
+					this.rail = this.preferred_rail();
 				}
 				this.render();
 			})
@@ -64,6 +72,51 @@ class CryptoPosTerminal {
 				this.note_error(`could not load rails: ${e.message || e}`);
 				this.render();
 			});
+	}
+
+	// ------------------------------------------------------------------
+	// WHICH RAILS A GIVEN PERSON MAY PICK
+	//
+	// THIS DEPLOYMENT ENABLES SEVEN RAILS AND CAN COMPLETE A VISITOR'S SALE ON
+	// EXACTLY ONE. `xtr` is the only rail offered publicly (the decision is in
+	// CONTINUE.md, 2026-08-31) and the only one the demo payer settles. The
+	// other six receive at an address whose wallet is the customer's own, so a
+	// visitor who picks one gets a QR nobody can pay, no error, and a sale that
+	// expires -- measured on this instance: a guest charged $1.00 on `btc` and
+	// it sat `awaiting` until it lapsed. Silence is the worst possible refusal.
+	//
+	// So a visitor is offered the payable rail and an operator is offered all
+	// of them. The role is the test because it is the one this deployment
+	// already draws: `Sales User` is what the till requires and what the guest
+	// account holds; `System Manager` is the operator.
+	//
+	// THE PROPER HOME FOR THIS IS A SETTING, not a constant in a page script.
+	// `CryptoPoS Settings` has no field for it and adding one is a schema
+	// change; this is the honest short version and it is marked as such.
+	is_operator() {
+		// NOT `frappe.user.has_role()`. Measured in this deployment's desk on
+		// 2026-09-02: it EXISTS as a function and returns `undefined` rather
+		// than a boolean, so a truthiness test on it is false for everybody --
+		// including the operator, whose terminal would have silently lost six
+		// rails. `frappe.user_roles` is the array the desk boots with, and the
+		// guest account reads ["Accounts User","Sales User","All","Guest",
+		// "Desk User"] from it while the operator's carries System Manager.
+		const roles = (window.frappe && frappe.user_roles) || [];
+		return roles.includes("System Manager");
+	}
+
+	offerable(rails) {
+		if (this.is_operator()) return rails;
+		const offered = rails.filter((rail) => PUBLIC_RAILS.includes(rail.name));
+		// NEVER LEAVE A TILL WITH NOTHING. If the publicly-offered rail is
+		// disabled, a filtered-to-empty list would render a terminal with no
+		// rail and no way to say why. Showing everything is the lesser fault.
+		return offered.length ? offered : rails;
+	}
+
+	preferred_rail() {
+		const preferred = this.rails.find((rail) => PUBLIC_RAILS.includes(rail.name));
+		return (preferred || this.rails[0]).name;
 	}
 
 	charge() {
@@ -309,6 +362,69 @@ class CryptoPosTerminal {
 		</div>`;
 	}
 
+	// ------------------------------------------------------------------
+	// "COVER THIS CHARGE" -- the house pays, because the visitor has no wallet.
+	//
+	// Only on a rail the house can actually pay. Offering it on `btc` would be
+	// a button that cannot work, which is worse than no button: the sale would
+	// sit there looking like something was happening.
+	//
+	// IT PROMISES NOTHING, and the wording is careful about that. The signing
+	// key is on the host; this records intent and the host decides, so the
+	// honest verb is "asked". What comes back -- covered, or refused with a
+	// reason -- arrives on the next poll through `demo_cover_state`.
+	cover_html(s) {
+		if (!COVERABLE_RAILS.includes(s.rail_key || this.rail)) return "";
+		const state = s.demo_cover_state || "";
+		const note = s.demo_cover_note || "";
+		if (state === "requested" || state === "paying") {
+			return `<div class="cpos-cover cpos-cover-wait">${__(
+				"Asked the house to cover this. Paying from the demo wallet…"
+			)}</div>`;
+		}
+		if (state === "refused") {
+			// THE REASON, VERBATIM. A refusal with no reason is the silent
+			// expiry this button exists to replace.
+			return `<div class="cpos-cover cpos-cover-no">${__("The house did not cover this")}${
+				note ? `: ${frappe.utils.escape_html(note)}` : "."
+			}</div>`;
+		}
+		if (state === "covered") {
+			return `<div class="cpos-cover cpos-cover-yes">${__(
+				"The house paid this. Waiting for the chain."
+			)}</div>`;
+		}
+		return `<div class="cpos-row"><button class="cpos-primary cpos-cover-btn" data-act="cover">${__(
+			"Cover this charge"
+		)}</button></div>
+		<div class="cpos-cover-hint">${__(
+			"No wallet? The demo wallet pays it for you."
+		)}</div>`;
+	}
+
+	cover() {
+		if (!this.sale) return;
+		this.busy = true;
+		this.render();
+		frappe
+			.call({ method: "cryptopos.api.request_cover", args: { sale_name: this.sale.name } })
+			.then((r) => {
+				this.busy = false;
+				if (r.message && r.message.demo_cover_state) {
+					this.sale.demo_cover_state = r.message.demo_cover_state;
+				}
+				this.render();
+				// Watch for the answer without making the visitor press Poll.
+				this.autopoll = true;
+				this.start_autopoll();
+			})
+			.catch((e) => {
+				this.busy = false;
+				this.note_error(`could not ask the house to cover this: ${e.message || e}`);
+				this.render();
+			});
+	}
+
 	awaiting_html() {
 		const s = this.sale;
 		const words = { awaiting: __("Awaiting payment"), detected: __("Seen, not yet mined"), confirming: __("Confirming") };
@@ -359,16 +475,40 @@ class CryptoPosTerminal {
 			<div class="cpos-uri" title="${frappe.utils.escape_html(s.uri || "")}">${
 				frappe.utils.escape_html(s.uri || "")
 			}</div>
+			${this.cover_html(s)}
 			<div class="cpos-row">
 				<button class="cpos-secondary" data-act="poll">${__("Poll the node")}</button>
 				<label class="cpos-check"><input type="checkbox" data-act="autopoll" ${
 					this.autopoll ? "checked" : ""
 				}> ${__("auto-poll")}</label>
-				<button class="cpos-secondary" data-act="cancel">${__("Cancel")}</button>
+				<button class="cpos-secondary" data-act="cancel">${__("Leave this sale")}</button>
 			</div>
+			${this.leaving_html()}
 			<div class="cpos-gate">${frappe.utils.escape_html(s.gate_text || "")}</div>
 			${this.rate_html(s)}
 		</div>`;
+	}
+
+	// WHAT LEAVING A SALE ACTUALLY DOES, which is less than "Cancel" promised.
+	//
+	// `clear_sale()` sets `this.sale = null` and makes NO server call. The
+	// sale stays `awaiting` and stays payable until its rate lock runs out.
+	// The button said "Cancel", which a cashier reads as "this sale is void"
+	// -- and a customer holding the QR from thirty seconds ago can still pay
+	// it, whereupon it settles and books an invoice for a sale the operator
+	// believed was cancelled. Measured on this deployment: CPS-2026-00555 was
+	// "cancelled" on screen and expired an hour later with the lock running
+	// the whole time.
+	//
+	// A REAL CANCEL IS NOT AVAILABLE AND SHOULD NOT BE FAKED. The QR is
+	// already in the customer's hands; a sale marked terminal early would
+	// strand any payment made against it, which is worse than the sale
+	// standing. `LEGAL` has no `cancelled` state and D10 says a terminal
+	// state never reopens. So the honest fix is the label and this line.
+	leaving_html() {
+		return `<div class="cpos-leaving">${__(
+			"Leaving returns to the keypad. This charge stays payable until its rate lock runs out."
+		)}</div>`;
 	}
 
 	done_html() {
@@ -422,10 +562,25 @@ class CryptoPosTerminal {
 					)} ${__("invoiced")}.</div>`
 				: "";
 
+		// WHAT COULD NOT BE BOUND IS THE REMAINDER, NOT THE WHOLE SIGHTING.
+		// `sighted_native` is everything the rail saw; `credited_native` is
+		// the part of it this sale was paid with, and the library guarantees
+		// credited <= sighted (`SettlementDecision.__post_init__` refuses the
+		// other way round). So the unbound money is the difference.
+		//
+		// Testing `sighted > 0` instead made the line fire on every ordinary
+		// settled sale, where sighted == credited and the remainder is zero:
+		// measured on this instance at 41 of 57 confirmed sales, every one of
+		// them with nothing unbound. The visitor read "could not be bound to
+		// this sale. It is not booked." directly above "Booked as
+		// ACC-SINV-...". A true field behind a false sentence, which is the
+		// shape CONTINUE.md §5 keeps a list of.
+		const unbound =
+			parseInt(s.sighted_native || "0", 10) - parseInt(s.credited_native || "0", 10);
 		const sighted =
-			parseInt(s.sighted_native || "0", 10) > 0
+			unbound > 0
 				? `<div class="cpos-sighted">${__("Sighted")} ${this.fmt_native(
-						s.sighted_native
+						String(unbound)
 					)} ${frappe.utils.escape_html(
 						s.unit_name || ""
 					)} ${__("that could not be bound to this sale. It is not booked.")}</div>`
@@ -656,6 +811,7 @@ class CryptoPosTerminal {
 		});
 		this.$body.find('[data-act="charge"]').on("click", () => this.charge());
 		this.$body.find('[data-act="poll"]').on("click", () => this.poll());
+		this.$body.find('[data-act="cover"]').on("click", () => this.cover());
 		this.$body.find('[data-act="cancel"]').on("click", () => this.clear_sale());
 		this.$body.find('[data-act="points"]').on("click", () => {
 			this.show_points = !this.show_points;
@@ -731,8 +887,24 @@ class CryptoPosTerminal {
 .cpos-secondary { padding: 0.5rem 0.8rem; border-radius: 8px; cursor: pointer;
 	border: 1px solid var(--border-color); background: var(--control-bg, var(--bg-color));
 	color: var(--text-color); font-size: 0.85rem; }
+/* The cover button and what comes back from it. Sized like the keypad's
+   Charge button because it is the same kind of act: the one thing on the
+   screen a visitor is meant to press. */
+.cpos-cover-btn { width: 100%; padding: 0.8rem 1rem; border-radius: 10px; border: 0;
+	cursor: pointer; background: var(--text-color); color: var(--bg-color);
+	font-size: 1rem; font-weight: 600; }
+.cpos-cover-hint { margin-top: 0.35rem; font-size: 0.72rem; color: var(--text-muted); }
+.cpos-cover { margin-top: 0.8rem; font-size: 0.8rem; border-radius: 8px;
+	padding: 0.5rem 0.7rem; border: 1px solid var(--border-color); }
+.cpos-cover-wait { color: var(--text-muted); }
+.cpos-cover-yes { color: var(--green-600, #22683f); }
+/* A REFUSAL IS NOT A WARNING. It is the end of this attempt, and it reads in
+   the same red the ending cards use, because a visitor who skims it and waits
+   is a visitor watching a sale expire. */
+.cpos-cover-no { color: var(--red-600, #a4343a); }
 .cpos-check { font-size: 0.8rem; color: var(--text-muted); display: inline-flex;
 	align-items: center; gap: 0.3rem; margin: 0; cursor: pointer; }
+.cpos-leaving { margin-top: 0.5rem; font-size: 0.72rem; color: var(--text-muted); }
 .cpos-rate { margin-top: 0.35rem; font-size: 0.7rem; color: var(--text-muted); }
 .cpos-endline { margin-top: 0.4rem; color: var(--text-muted); font-size: 0.9rem; }
 .cpos-tone-ok .cpos-state { color: var(--green-600, #22683f); }
