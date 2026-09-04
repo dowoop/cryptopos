@@ -2049,7 +2049,7 @@ that could disprove it has been run.**
 
 ## D34 · Two tools against the one thing a model cannot do — BUILT, 2026-08-25
 
-the maintainer's observation, and it is correct: an agent cannot generate long opaque
+The maintainer's observation, and it is correct: an agent cannot generate long opaque
 identifiers reliably. This session produced three instances in a few hours, each
 of which survived every offline check:
 
@@ -2089,7 +2089,7 @@ next session **copies** an identifier instead of typing one.
 
 ## D35 · Three cold reviewers on one session's defects, and what they found still live — 2026-08-25
 
-the maintainer asked for the session to be reviewed by agents that could not see it, for
+The maintainer asked for the session to be reviewed by agents that could not see it, for
 **patterns of reasoning-instead-of-checking**. A dossier of 17 defects was
 written (`SESSION-2026-08-25-DEFECTS.md`) and three Codex agents worked from it
 in parallel: extract the pattern, attack the remedies, hunt live instances.
@@ -2625,7 +2625,7 @@ sale still backed by the chain?*
 `confirmation_checker` keeps the last 2000 block headers as
 `(height, header_hash, prev_hash)`, compares each new tip's `prev_hash` to the
 stored tip, walks back to a common ancestor on mismatch, and reverts the
-affected batches. the maintainer asked for that design. Codex was asked to attack it and
+affected batches. The maintainer asked for that design. Codex was asked to attack it and
 **the attack won.** Three of its findings were reproduced here before anything
 was built:
 
@@ -2995,7 +2995,7 @@ See D33, D43, D5.
 
 ## D46 · Ootle is a working rail, and everything it needed was one version behind — 2026-08-31
 
-the maintainer asked for testnet Ootle, rail first and then loyalty. Both work. What it
+The maintainer asked for testnet Ootle, rail first and then loyalty. Both work. What it
 cost was not design: it was that **every pinned dependency in the Ootle stack
 was a version behind a network that had moved**, and the first symptom looked
 like a dead testnet.
@@ -3125,7 +3125,7 @@ D26, D31, D33.
 
 ## D47 · A missing probe is not an unreachable rail, and the deployment was awarding points into a component that no longer exists — 2026-08-31
 
-the maintainer asked to focus entirely on testnet Ootle and get it fit to show. Two
+The maintainer asked to focus entirely on testnet Ootle and get it fit to show. Two
 things were in the way, and neither was visible from any green suite.
 
 ### `xtr` was UNREACHABLE from all four workers, against an indexer answering in 0.51 s
@@ -3248,7 +3248,7 @@ D31, D38, D39, D40, D46.
 
 ## D48 · "exact-amount match" was false on all five shared-binding rails, in the library, the till and three published READMEs — 2026-08-31
 
-the maintainer narrowed the goal: **Ootle is the only rail that will be offered publicly.**
+The maintainer narrowed the goal: **Ootle is the only rail that will be offered publicly.**
 That turned `xtr`'s binding from one weakness among seven into the whole
 product's attribution story, so it was attacked directly — and the attack landed
 somewhere nobody had looked.
@@ -3328,7 +3328,7 @@ Whether to *fix* the binding rather than only describe it. The cheap lever
 the merchant pays and fees are ~3,493 µT — or a payment component taking a sale
 reference as an argument, which the ootle README already names as the real
 answer and which is a smart contract rather than an adapter change. A
-counter-argument on this is running. **the maintainer's call.** See D5, D9, D21, D25, D45,
+counter-argument on this is running. **The maintainer's call.** See D5, D9, D21, D25, D45,
 D46, D47.
 
 ## D49 · The per-sale binding Ootle needs already works, and it was proved on a contract that is already deployed — 2026-08-31
@@ -3521,7 +3521,7 @@ correctly); `OOTLE_KEY_PASSPHRASE` for the sealed dev-bench key; and the
 
 ## D52 · The per-sale binding is live on esmeralda, and D48's failure is gone against the real chain — 2026-08-31
 
-the maintainer authorised publishing. The component is deployed, paid twice with real
+The maintainer authorised publishing. The component is deployed, paid twice with real
 XTR, and the real adapter attributes each payment to exactly the sale that
 named it.
 
@@ -3822,7 +3822,7 @@ See D46, D51, D55.
 
 ## D57 · Two reviews, two refusals, one real settlement bug, and a scan of mine that was wrong — 2026-08-31
 
-the maintainer authorised building a public surface **if the review cleared it**. It did
+The maintainer authorised building a public surface **if the review cleared it**. It did
 not clear it. It is not built.
 
 ### The public surface: refused, and the refusal is right
@@ -4176,7 +4176,7 @@ Decision 2 makes the instance operator-only behind Cloudflare Access, and
 and cannot create an Access application. A DNS record plus a running tunnel
 without Access is the ERPNext login on the public internet, in front of a
 surface where any authenticated `Sales User` can fabricate a settled sale that
-the five-minute `sweep_unbooked` turns into a real Sales Invoice. the maintainer chose
+the five-minute `sweep_unbooked` turns into a real Sales Invoice. The maintainer chose
 Access first, which is the order Decision 2 already implied.
 
 See D37, D48, D49, D57, D58.

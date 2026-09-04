@@ -132,6 +132,12 @@ from the formatter so it stays byte-identical to upstream.
 ## Reporting
 
 Do not open a public issue for a vulnerability that could direct funds
-incorrectly or expose private data. Email `dowoop@users.noreply.github.com` with
-`cryptopos-core security` in the subject. Ordinary hardening ideas and
-non-sensitive defects can use the public issue tracker once it is available.
+incorrectly or expose private data. Open a private advisory instead:
+
+    https://github.com/dowoop/cryptopos-core/security/advisories/new
+
+A private advisory rather than an address on purpose. It keeps the report
+non-public until there is a fix, it does not depend on one person reading one
+inbox, and it leaves a record attached to the repository rather than in a
+mailbox. Ordinary hardening ideas and non-sensitive defects can use the public
+issue tracker.

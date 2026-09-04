@@ -1,6 +1,6 @@
 app_name = "cryptopos"
 app_title = "CryptoPoS"
-app_publisher = "the maintainer"
+app_publisher = "dowoop"
 app_description = "Watch-only crypto point-of-sale terminal"
 app_email = "dowoop@users.noreply.github.com"
 app_license = "mit"

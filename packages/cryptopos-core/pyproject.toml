@@ -7,7 +7,6 @@ readme = "README.md"
 # packaging tools read now.
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "the maintainer", email = "dowoop@users.noreply.github.com" }]
 keywords = ["crypto", "point-of-sale", "pos", "payments", "qr", "tari", "ootle", "bitcoin", "ethereum", "address-validation", "bech32", "eip55"]
 
 # The host app targets 3.14, but nothing here needs it -- the whole package is
@@ -37,8 +36,8 @@ ethereum-sepolia-usdc = "cryptopos_core.evm:usdc_ethereum_sepolia"
 polygon-amoy-usdc = "cryptopos_core.evm:usdc_polygon_amoy"
 
 [project.urls]
-Homepage = "https://github.com/dowoop/cryptopos"
-Source = "https://github.com/dowoop/cryptopos/tree/main/packages/cryptopos-core"
+Homepage = "https://github.com/dowoop/cryptopos-core"
+Source = "https://github.com/dowoop/cryptopos-core"
 
 [build-system]
 requires = ["hatchling==1.32.0"]

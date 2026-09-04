@@ -1,7 +1,7 @@
 [project]
 name = "cryptopos"
 authors = [
-    { name = "the maintainer", email = "dowoop@users.noreply.github.com"}
+    { name = "dowoop", email = "dowoop@users.noreply.github.com"}
 ]
 description = "Watch-only crypto point-of-sale terminal"
 requires-python = ">=3.14"

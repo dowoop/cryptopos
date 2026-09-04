@@ -657,7 +657,7 @@ def earns_policy_points(rail):
 	Solana devnet sale awarded points on Ootle, and the receipt said so
 	(`1884e30`). That worked, and it left the merchant holding two assets for
 	one transaction and reconciling across a bridge that does not exist yet.
-	the maintainer's call is to collapse that until interoperability is real: one asset
+	The maintainer's call is to collapse that until interoperability is real: one asset
 	in, one asset out.
 
 	**THIS IS A RESTRICTION AND IT IS MEANT TO BE ONE.** With it in force,
