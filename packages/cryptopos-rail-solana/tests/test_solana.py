@@ -450,7 +450,7 @@ class HistoryBoundaries(unittest.TestCase):
 class RecordedVectors(unittest.TestCase):
 	"""The shared attribution vectors, four of them real devnet transactions.
 
-	The same file is run against the tender-apps reconciler by
+	The same file is run against every other consumer of these vectors by
 	`cryptopos/tools/attribution_agreement.py`. Sharing the EXAMPLES rather than
 	the implementation is deliberate: a reconciliation that shares code with the
 	thing it reconciles proves nothing, and two implementations with no shared

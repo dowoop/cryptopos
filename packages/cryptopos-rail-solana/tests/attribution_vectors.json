@@ -1,5 +1,5 @@
 {
-	"what": "Real devnet transactions and what each one paid THIS sale. Consumed by both the rail (packages/cryptopos-rail-solana) and the reconciler (tender-apps/apps/settled.py) so the two cannot drift apart on the one question they both answer: how much of this transaction belongs to this sale. See cryptopos DECISIONS.md D33 and D35.",
+	"what": "Real devnet transactions and what each one paid THIS sale. Consumed by the rail (packages/cryptopos-rail-solana) and by every other implementation that answers the same question, so they cannot drift apart on the one question they both answer: how much of this transaction belongs to this sale. See cryptopos DECISIONS.md D33 and D35.",
 	"captured_utc": "2026-08-25",
 	"vectors": [
 		{

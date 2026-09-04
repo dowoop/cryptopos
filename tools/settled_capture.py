@@ -1,6 +1,6 @@
 """Every confirmed sale and what the books say it credited. Read-only.
 
-**Why this exists.** `tender-apps/apps/settled.py` reconciles this deployment's
+**Why this exists.** A separate reconciler checks this deployment's
 books against the chains that carried the money, and it is the only thing that
 checks "the books agree with the chain" — the claim a point-of-sale has to be
 able to make. It ran against a fixture somebody captured by hand, once, and a

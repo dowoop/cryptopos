@@ -129,8 +129,8 @@ sudo usermod -aG docker $USER   # then log out and back in
 This matters for planning package work, so it is written down rather than
 rediscovered.
 
-The tkinter terminal in `../Point of Sale/rails.py` defines **12 rails across
-8 chain families**, and every one of them is testnet:
+The rail table defines **12 rails across 8 chain families**, and every one of
+them is testnet:
 
 | maturity | count | rails |
 |---|---|---|

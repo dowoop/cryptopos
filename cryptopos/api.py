@@ -182,8 +182,9 @@ def report_award(name, state, tx_id="", output="", reason=""):
 #
 # A visitor on the public instance has no wallet, so the house pays. It cannot
 # pay from HERE: the Ootle key is on the host and this container has no signer.
-# So the button records INTENT and a host-side process (`Point of Sale/
-# demo_payer.py`) claims it, pays, and reports back.
+# So the button records INTENT and a host-side payer -- outside this
+# container, holding the key this container must not -- claims it, pays, and
+# reports back.
 #
 # The cap is not here either. What the house can afford is a fact about a
 # wallet the host can see and this container cannot, so `request_cover` never
