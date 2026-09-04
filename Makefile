@@ -186,12 +186,11 @@ fit: ## Can this deployment be shown to strangers? (D5, D11, D15)
 	@echo "        does every booked sale still have a live transaction? (D15)"
 	@echo
 	@echo "=== and the one that proves the whole path, not the parts (D19) ==="
-	@echo "  NOT RUNNABLE FROM HERE SINCE 2026-09-04. It spent testnet money, so"
-	@echo "  it lived beside the payer in a separate checkout, and that checkout"
-	@echo "  was retired. This app is watch-only and holds no key, so nothing in"
-	@echo "  this repository can pay a sale it charged."
+	@echo "  Spends real testnet money, so it refuses without --send. The payer"
+	@echo "  is NOT in this repository and must not be: this app is watch-only"
+	@echo "  and holds no key. Name one, or set CRYPTOPOS_PAYER."
 	@echo
-	@echo "    charge -> pay -> settle -> book, end to end, needs a wallet"
-	@echo "    this repository deliberately does not carry."
+	@echo "    python3 bin/prove_end_to_end.py --payer <wallet> --send"
+	@echo "        charge -> pay -> settle -> book, asserted end to end"
 	@echo
 	@echo "  Both must refuse before this deployment is public. See GOAL.md."
