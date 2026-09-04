@@ -6,7 +6,7 @@
 "how much of this transaction belongs to this sale": the rail
 (`cryptopos-rail-solana`) decides what to credit a customer, the reconciler
 (`tender-apps/apps/settled.py`) decides whether the books agree with the chain,
-and the terminal (`Point of Sale/watchers.py`) watches the payment at checkout.
+and the checkout terminal watched the payment at the till.
 The terminal is the copy `DECISIONS.md` D35 caught after it missed the D33 fix.
 They are deliberately separate — a reconciliation that shares an implementation
 with the thing it reconciles proves nothing — and that same separation means a
@@ -46,7 +46,13 @@ from cryptopos_rail_solana import solana_devnet_sol as rail
 
 
 def reconciler():
-    """The tender-apps reconciler, loaded by path -- it is another repository."""
+    """The tender-apps reconciler, or None when that repository is not here.
+
+    Same reasoning as `terminal()`: another repository, optional, and its
+    absence is reported rather than raised.
+    """
+    if not RECONCILER.is_file():
+        return None
     sys.path.insert(0, str(WORKSPACE / "tender-apps" / "site-packages"))
     spec = importlib.util.spec_from_file_location("settled_under_test", RECONCILER)
     module = importlib.util.module_from_spec(spec)
@@ -55,7 +61,15 @@ def reconciler():
 
 
 def terminal():
-    """The checkout terminal, imported from its space-containing directory."""
+    """The checkout terminal, or None when its repository is not beside this one.
+
+    RETIRED 2026-09-04, and this returns None rather than raising because the
+    point of this tool is that three implementations agree. Losing one does not
+    make the remaining comparison worthless -- it makes it a two-way comparison,
+    which is worth saying out loud rather than crashing over.
+    """
+    if not TERMINAL.is_dir():
+        return None
     sys.path.insert(0, str(TERMINAL))
     import watchers
     return watchers
@@ -67,8 +81,16 @@ def main():
     other = reconciler()
     checkout = terminal()
 
+    present = ["the rail"]
+    present += ["the reconciler"] if other else []
+    present += ["the terminal"] if checkout else []
+    for name, source in (("the reconciler", RECONCILER), ("the terminal", TERMINAL)):
+        if name not in present:
+            print(f"ABSENT: {name} ({source}) is not beside this repository,"
+                  f" so it is not part of this comparison.")
     print(f"{len(vectors)} vectors, {sum(1 for v in vectors if v['expected_lamports'] is None)} "
-          f"of which must be refused by all three\n")
+          f"of which must be refused by {'all ' if len(present) > 2 else 'both ' if len(present) == 2 else ''}"
+          f"{len(present)} consumer(s): {', '.join(present)}\n")
     failures = 0
 
     for vector in vectors:
@@ -80,25 +102,32 @@ def main():
             transaction, recipient, reference, transaction["slot"])
         from_rail = None if parsed is None else parsed[0]
 
-        other._rpc = lambda *arguments, _tx=transaction: _tx
-        from_reconciler = other._solana_credit("signature", recipient, reference)
+        answers = {"rail": from_rail}
+        if other is not None:
+            other._rpc = lambda *arguments, _tx=transaction: _tx
+            answers["reconciler"] = other._solana_credit(
+                "signature", recipient, reference)
+        if checkout is not None:
+            answers["terminal"], _terminal_reason = checkout._solana_lamport_credit(
+                transaction, transaction["meta"], recipient, reference)
 
-        from_terminal, _terminal_reason = checkout._solana_lamport_credit(
-            transaction, transaction["meta"], recipient, reference)
-
-        agree = from_rail == from_reconciler == from_terminal
-        correct = all(answer == expected for answer in
-                      (from_rail, from_reconciler, from_terminal))
+        # ONE CONSUMER CANNOT DISAGREE WITH ITSELF. With the others retired the
+        # comparison collapses to "is the rail right", which is still worth
+        # asserting -- but calling that agreement would be the overclaim this
+        # tool exists to catch.
+        agree = len(set(answers.values())) == 1
+        correct = all(answer == expected for answer in answers.values())
         ok = agree and correct
         failures += 0 if ok else 1
 
         print(f"  {'PASS' if ok else 'FAIL'}  {vector['name']}")
-        print(f"        rail {from_rail!r} · reconciler {from_reconciler!r} · "
-              f"terminal {from_terminal!r} · expected {expected!r}")
+        print("        " + " · ".join(f"{k} {v!r}" for k, v in answers.items())
+              + f" · expected {expected!r}")
         if not agree:
             print("        THEY DISAGREE — one transaction, different answers")
         elif not correct:
-            print(f"        all three agree and all three are wrong: {vector['why']}")
+            print(f"        every consumer present agrees and every one is"
+                  f" wrong: {vector['why']}")
         if from_rail is None and reason:
             print(f"        rail's reason: {reason}")
 

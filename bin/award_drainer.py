@@ -27,6 +27,7 @@ Credentials come from the environment:
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -41,9 +42,16 @@ TOOLKIT_TIMEOUT_SECONDS = 90.0
 
 POLL_SECONDS = 15
 
-DEFAULT_TOOLKIT = os.path.expanduser(
-    "~/Workstation/Business/Point of Sale/ootle/toolkit/target/release/toolkit"
-)
+# THE TOOLKIT IS NOT IN THIS REPOSITORY and cannot be: it is a Rust binary,
+# and the reason above is why it cannot live in the container either. Its
+# default used to be an absolute path into a sibling checkout on one machine,
+# which was wrong everywhere else and became wrong here too when that checkout
+# was retired on 2026-09-04.
+#
+# So it is named, not guessed: CRYPTOPOS_TOOLKIT, or `toolkit` on PATH, or
+# --toolkit. An empty default is deliberate -- the check below then refuses
+# with the three ways to fix it, rather than reporting a path nobody chose.
+DEFAULT_TOOLKIT = os.environ.get("CRYPTOPOS_TOOLKIT") or shutil.which("toolkit") or ""
 
 BASE = os.environ.get("CRYPTOPOS_URL", "http://localhost:8080").rstrip("/")
 KEY = os.environ.get("CRYPTOPOS_KEY", "")
@@ -185,6 +193,10 @@ def main():
     parser.add_argument("--toolkit", default=DEFAULT_TOOLKIT)
     args = parser.parse_args()
 
+    if not args.toolkit:
+        print("no toolkit: set CRYPTOPOS_TOOLKIT, put `toolkit` on PATH, or"
+              " pass --toolkit. Nothing was drained.", file=sys.stderr)
+        return 2
     if not os.path.exists(args.toolkit):
         print(f"toolkit not found at {args.toolkit}", file=sys.stderr)
         return 2
