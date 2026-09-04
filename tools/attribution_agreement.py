@@ -5,7 +5,7 @@
 **The class of defect this exists for.** Three programs independently answer
 "how much of this transaction belongs to this sale": the rail
 (`cryptopos-rail-solana`) decides what to credit a customer, the reconciler
-(`tender-apps/apps/settled.py`) decides whether the books agree with the chain,
+(`tools/reconciler_reference.py`) decides whether the books agree with the chain,
 and the checkout terminal watched the payment at the till.
 The terminal is the copy `DECISIONS.md` D35 caught after it missed the D33 fix.
 They are deliberately separate — a reconciliation that shares an implementation
@@ -36,7 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE = ROOT.parent
 VECTORS = ROOT / "packages" / "cryptopos-rail-solana" / "tests" / "attribution_vectors.json"
-RECONCILER = WORKSPACE / "tender-apps" / "apps" / "settled.py"
+RECONCILER = ROOT / "tools" / "reconciler_reference.py"
 TERMINAL = WORKSPACE / "Point of Sale"
 
 sys.path.insert(0, str(ROOT / "packages" / "cryptopos-core" / "src"))
@@ -46,14 +46,15 @@ from cryptopos_rail_solana import solana_devnet_sol as rail
 
 
 def reconciler():
-    """The tender-apps reconciler, or None when that repository is not here.
+    """The second implementation, or None if it is missing.
 
-    Same reasoning as `terminal()`: another repository, optional, and its
-    absence is reported rather than raised.
+    It lived in another repository until 2026-09-04 and was lifted here
+    VERBATIM when that repository was retired. Loaded by path rather than
+    imported, so it keeps its own module namespace and cannot accidentally
+    share state with the rail it is checking.
     """
     if not RECONCILER.is_file():
         return None
-    sys.path.insert(0, str(WORKSPACE / "tender-apps" / "site-packages"))
     spec = importlib.util.spec_from_file_location("settled_under_test", RECONCILER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
