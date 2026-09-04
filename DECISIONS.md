@@ -4569,6 +4569,51 @@ asserted as the CHILD saw them. 125 checks.
 
 ---
 
+## D66 · Charging has a ceiling, because the identity gate stopped holding — TAKEN, 2026-09-04
+
+`charge()` validated the amount, the rail, the mode, the adapter and the
+recipient, and imposed **no ceiling of any kind**. That was defensible while
+`GOAL.md` step 1 held: one trusted principal behind Cloudflare Access, so there
+was no distrustful population to limit.
+
+**Step 1 no longer holds.** Measured 2026-09-04: `<the published hostname>` answers
+HTTP 200 with only ERPNext's own login in front of it. The Access gate is
+bypassed and what stands behind it is the shared guest account. An adversarial
+review put the conclusion in one sentence: *do not leave public shared
+credentials attached to uncapped automation.* Each charge consumes payer
+capacity, writes accounting state and arms a background watcher.
+
+Two ceilings, because they stop different things: `max_open_sales` (5) bounds
+how much can be in flight at once, and `max_sales_per_hour` (20) bounds the
+rate. Both are global across users and rails, for D64's reason — a per-identity
+cap caps nothing when identities are free.
+
+**A missing, zero or negative setting uses the conservative default and never
+disables the ceiling.** An existing deployment upgrading past this must become
+capped rather than stay uncapped, and `0` meaning "unlimited" is the convention
+that would have made this decision cosmetic.
+
+### Two things that would have made it not work
+
+**Counting has to be serialised or it counts nothing.** Two web workers can both
+observe the last free slot and both insert into it. The `tabDocType` row for
+`CryptoPoS Settings` is taken `FOR UPDATE` as a mutex before the locking reads
+of `tabCrypto Sale`, and held until the request transaction commits — after the
+admitted sale is written. This app runs a web process, a scheduler and queues, so
+a counter held in a process is per-process and resets on restart.
+
+**The refusal has to land before anything is reserved.** It is placed after the
+adapter and recipient checks and before `capture_baseline` and `frappe.new_doc`,
+so a refused charge captures no baseline, inserts no sale and arms no watcher.
+This register is full of debris left by failures that happened one step too late.
+
+Gates: `make test` 686 OK, `make prove` 35/35 methods and 22/22 controls, and
+five new tests in `tests/test_charge_limits.py`. Their direction was checked by
+raising both defaults to 99,999 — two of the five fail with `Refused not raised`,
+and pass again when restored. `make worth` could not run: the sandbox forbids
+Python's forkserver socket, so 2,302 mutants were enumerated and none executed.
+That is unmeasured rather than green.
+
 ## D65 · An Ootle sale is paid the way its binding says — TAKEN, 2026-09-01
 
 `customer_wallet.pay` routed every XTR sale to `ootle_pay.pay(address,

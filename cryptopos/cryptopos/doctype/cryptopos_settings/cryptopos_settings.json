@@ -11,6 +11,10 @@
   "column_break_top",
   "chain_reference",
   "loyalty_earn_rate",
+  "section_charge_limits",
+  "max_open_sales",
+  "column_break_charge_limits",
+  "max_sales_per_hour",
   "section_receiving",
   "btc_testnet_address",
   "section_loyalty",
@@ -60,6 +64,29 @@
    "fieldname": "loyalty_earn_rate",
    "fieldtype": "Int",
    "label": "Loyalty Earn Rate (points per cent)"
+  },
+  {
+   "fieldname": "section_charge_limits",
+   "fieldtype": "Section Break",
+   "label": "Charge Admission Limits"
+  },
+  {
+   "default": "5",
+   "description": "Global across all users and rails. A missing, zero or negative value still uses the conservative default of 5; it never disables the ceiling.",
+   "fieldname": "max_open_sales",
+   "fieldtype": "Int",
+   "label": "Maximum Open Sales"
+  },
+  {
+   "fieldname": "column_break_charge_limits",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "20",
+   "description": "Global number of sales that may be opened in any rolling hour, including demo sales. A missing, zero or negative value uses 20.",
+   "fieldname": "max_sales_per_hour",
+   "fieldtype": "Int",
+   "label": "Maximum Sales Per Hour"
   },
   {
    "fieldname": "section_receiving",

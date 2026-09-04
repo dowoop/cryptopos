@@ -23,6 +23,9 @@ from cryptopos_core.errors import CryptoPosError
 from cryptopos_core.plugin import PaymentIntent
 
 RATE_LOCK_SECONDS = 15 * 60
+DEFAULT_MAX_OPEN_SALES = 5
+DEFAULT_MAX_SALES_PER_HOUR = 20
+OPEN_SALE_STATES = ("awaiting", "detected", "confirming")
 
 
 def _epoch(moment):
@@ -123,6 +126,66 @@ def _scale_of(rail, adapter):
 	return {"native_decimals": native, "display_decimals": display}
 
 
+def _configured_limit(settings, fieldname, default):
+	"""A missing or non-positive setting stays capped at the safe default."""
+	try:
+		value = int(settings.get(fieldname) or default)
+	except (TypeError, ValueError):
+		return default
+	return value if value > 0 else default
+
+
+def _enforce_charge_limits(settings):
+	"""Serialise charge admission, then count the shared database state.
+
+	The singleton's DocType row is the mutex. Every charge transaction takes the
+	same guaranteed-to-exist row lock before its locking reads of Crypto Sale, so
+	two web workers cannot both observe the last available slot and insert into
+	it. The lock lives until the request transaction commits, after the admitted
+	sale has been written.
+	"""
+	frappe.db.sql(
+		"""SELECT name FROM `tabDocType`
+		   WHERE name = %(doctype)s
+		   FOR UPDATE""",
+		{"doctype": "CryptoPoS Settings"},
+	)
+
+	open_limit = _configured_limit(settings, "max_open_sales", DEFAULT_MAX_OPEN_SALES)
+	hour_limit = _configured_limit(
+		settings, "max_sales_per_hour", DEFAULT_MAX_SALES_PER_HOUR
+	)
+	window_start = add_to_date(now_datetime(), hours=-1)
+	rows = frappe.db.sql(
+		"""SELECT state, creation FROM `tabCrypto Sale`
+		   WHERE state IN %(open_states)s OR creation >= %(window_start)s
+		   FOR UPDATE""",
+		{"open_states": OPEN_SALE_STATES, "window_start": window_start},
+		as_dict=True,
+	)
+
+	open_sales = sum(row.state in OPEN_SALE_STATES for row in rows)
+	if open_sales >= open_limit:
+		frappe.throw(
+			_(
+				"Having more than {0} sales open at once is refused by decision. "
+				"Wait for an open sale to settle or expire before charging another."
+			).format(open_limit),
+			title=_("Open-sale limit reached"),
+		)
+
+	window_sales = sum(row.creation >= window_start for row in rows)
+	if window_sales >= hour_limit:
+		frappe.throw(
+			_(
+				"Opening more than {0} sales in one hour is refused by decision. "
+				"Wait until an earlier sale leaves the rolling one-hour window "
+				"before charging another."
+			).format(hour_limit),
+			title=_("Hourly charge limit reached"),
+		)
+
+
 def charge(usd_cents, rail_key, loyalty_account=""):
 	"""Snapshot a sale and arm its watcher. Returns the Crypto Sale doc."""
 	usd_cents = int(usd_cents)
@@ -160,6 +223,14 @@ def charge(usd_cents, rail_key, loyalty_account=""):
 	# be request-only on the operator's own connection.
 	adapter = catalog.require_chargeable(rail, mode)
 	configuration = catalog.configuration_for(rail, mode)
+
+	# Admission is the last read-only act before recipient_for can allocate a
+	# derived address, a quote is taken, a chain baseline is captured, an
+	# invoice identity is minted or a sale is written. Demo takes this path too:
+	# it uses the same database rows and watcher, and five simultaneous / twenty
+	# hourly openings leave it useful without making a public demo an uncapped
+	# automation endpoint.
+	_enforce_charge_limits(settings)
 
 	# Where the money goes, and whose it is. Stated positively -- "the
 	# operator configured this" -- because the negative form was defeated
